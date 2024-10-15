@@ -227,9 +227,9 @@ int main()
     Sim->min_gamma = 1e1;
     Sim->max_gamma = 1e8;
     Sim->init_power = 2.;
-    Sim->samples_per_decade = 20;
-    Sim->dt = 100000.;
-    Sim->end_t = 100000000.;
+    Sim->samples_per_decade = 40;
+    Sim->dt = 1000.;
+    Sim->end_t = 10000000.;
 
     Sim->inject_min = 1e4;
     Sim->inject_max = 1e8;
@@ -243,15 +243,15 @@ int main()
     // calculate S
     calc_S(Sim);
 
-    // calculate inputs
-    double average_gamma =
-        (pow(Sim->inject_max, 2. - Sim->inject_power) / (2. - Sim->inject_power)) - (pow(Sim->inject_min, 2. - Sim->inject_power) / (2. - Sim->inject_power));
-    if (Sim->inject_power == 2.)
-        average_gamma = log(Sim->inject_max) - log(Sim->inject_min);
     Sim->norm =
         1. /
         ((pow(Sim->max_gamma, 1. - Sim->inject_power) / (1. - Sim->inject_power)) - (pow(Sim->min_gamma, 1. - Sim->inject_power) / (1. - Sim->inject_power)));
-
+    
+    // calculate inputs
+    double average_gamma =
+        Sim->norm * (pow(Sim->inject_max, 2. - Sim->inject_power) / (2. - Sim->inject_power)) - Sim->norm * (pow(Sim->inject_min, 2. - Sim->inject_power) / (2. - Sim->inject_power));
+    if (Sim->inject_power == 2.)
+        average_gamma = Sim->norm * log(Sim->inject_max) - Sim->norm * log(Sim->inject_min);
     
     double volume = (4./3.) * M_PI * Sim->R * Sim->R * Sim->R;
     // calculate injected Qe0

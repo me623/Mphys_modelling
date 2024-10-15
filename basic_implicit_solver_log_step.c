@@ -301,17 +301,19 @@ int main()
 
     calc_S(Sim);
 
-    // calculate inputs
-    double average_gamma =
-        (pow(Sim->inject_max, 2. - Sim->inject_power) / (2. - Sim->inject_power)) - (pow(Sim->inject_min, 2. - Sim->inject_power) / (2. - Sim->inject_power));
-    if (Sim->inject_power == 2.)
-        average_gamma = log(Sim->inject_max) - log(Sim->inject_min);
     Sim->norm =
         1. /
         ((pow(Sim->max_gamma, 1. - Sim->inject_power) / (1. - Sim->inject_power)) - (pow(Sim->min_gamma, 1. - Sim->inject_power) / (1. - Sim->inject_power)));
 
-        // find volume
-        double volume = (4. / 3.) * M_PI * Sim->R * Sim->R * Sim->R;
+
+    // calculate inputs
+    double average_gamma =
+        Sim->norm * (pow(Sim->inject_max, 2. - Sim->inject_power) / (2. - Sim->inject_power)) - Sim->norm * (pow(Sim->inject_min, 2. - Sim->inject_power) / (2. - Sim->inject_power));
+    if (Sim->inject_power == 2.)
+        average_gamma = Sim->norm * log(Sim->inject_max) - Sim->norm * log(Sim->inject_min);
+
+    // find volume
+    double volume = (4. / 3.) * M_PI * Sim->R * Sim->R * Sim->R;
     // calculate injected Qe0
     Sim->Q_e0 = (Sim->L / (volume * average_gamma * m_e * c * c));
     // calculate free escape time
