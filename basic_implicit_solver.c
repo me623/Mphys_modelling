@@ -7,14 +7,14 @@
 #define BUFFER_SIZE 33554432
 // CGS unit constants
 #define m_e 9.109e-28
-#define c 3e10
-#define sigma_t 6.65e-25
+#define c 2.998e10
+#define sigma_t 6.652e-25
 
 typedef struct LeptonParams
 {
     double *current_n;
     double *next_n;
-    double *g;
+    double *gamma;
     double *delta_gamma;
 } LeptonParams;
 
@@ -31,7 +31,6 @@ typedef struct SimulationParams
     double dt;
 
     // free parameters
-    double tau_esc;     // free escape time
     double R;           // radius of system (spherical geo)
     double inject_power;// power law power
     double inject_min;  // turning point energy
@@ -42,6 +41,7 @@ typedef struct SimulationParams
 
     double Q_e0;    // starting population
     double S;       // sync vs inv. compton
+    double tau_esc; // free escape time
     double norm;    // normalize the prob dist
     int32_t n_species;
     LeptonParams **Species;
@@ -59,16 +59,16 @@ void malloc_and_fill_gamma_array(SimulationParams *Sim, LeptonParams *Lepton)
     Sim->array_len = decades * Sim->samples_per_decade;
 
     printf("%lld\n", Sim->array_len);
-    Lepton->g = calloc(Sim->array_len + 1, sizeof(double));
+    Lepton->gamma = calloc(Sim->array_len + 1, sizeof(double));
     Lepton->delta_gamma = calloc(Sim->array_len + 1, sizeof(double));
     for (int64_t i = 0; i < Sim->array_len + 1; i++)
     {
-        Lepton->g[i] = pow(10, log10(Sim->min_gamma) + i / (double)Sim->samples_per_decade);
+        Lepton->gamma[i] = pow(10, log10(Sim->min_gamma) + i / (double)Sim->samples_per_decade);
     }
 
     for (int64_t i = Sim->array_len; i >= 0; i--)
     {
-        Lepton->delta_gamma[i] = Lepton->g[i + 1] - Lepton->g[i];
+        Lepton->delta_gamma[i] = Lepton->gamma[i + 1] - Lepton->gamma[i];
     }
 }
 
@@ -94,7 +94,7 @@ void free_Sim_Species_array(SimulationParams *Sim)
     {
         free(Sim->Species[i]->next_n);
         free(Sim->Species[i]->current_n);
-        free(Sim->Species[i]->g);
+        free(Sim->Species[i]->gamma);
         free(Sim->Species[i]->delta_gamma);
         free(Sim->Species[i]);
     }
@@ -118,15 +118,15 @@ double I(double gamma, double min, double max, double power, SimulationParams *S
 
 void iteration(SimulationParams *Sim, LeptonParams *Lepton)
 {
-    for (int64_t i = Sim->array_len; i >= 0; i--)
+    for (int64_t i = Sim->array_len - 1; i >= 0; i--)
     {
         Lepton->next_n[i] =
         Sim->tau_esc * 
-        (Sim->S * Sim->dt * Lepton->g[i+1] * Lepton->g[i+1] * Lepton->next_n[i+1]
-        - Lepton->delta_gamma[i] * Sim->dt * I(Lepton->g[i], Sim->inject_min, Sim->inject_max, Sim->init_power, Sim)
+        (Sim->S * Sim->dt * Lepton->gamma[i+1] * Lepton->gamma[i+1] * Lepton->next_n[i+1]
+        - Lepton->delta_gamma[i] * Sim->dt * I(Lepton->gamma[i], Sim->inject_min, Sim->inject_max, Sim->inject_power, Sim)
         - Lepton->delta_gamma[i] * Lepton->current_n[i])
         /
-        (Sim->S * Sim->tau_esc * Sim->dt * Lepton->g[i] * Lepton->g[i]
+        (Sim->S * Sim->tau_esc * Sim->dt * Lepton->gamma[i] * Lepton->gamma[i]
         - Lepton->delta_gamma[i] * Sim->tau_esc
         - Lepton->delta_gamma[i] * Sim->dt);
 
@@ -143,7 +143,8 @@ void set_initial_state(SimulationParams *Sim)
         Sim->Species[lepton]->next_n[Sim->array_len] = 0.;
         for (int64_t i = 0; i < Sim->array_len; i++)
         {
-            Sim->Species[lepton]->current_n[i] =(Sim->rho / m_e) * (I(Sim->Species[lepton]->g[i],Sim->min_gamma, Sim->max_gamma, Sim->init_power, Sim) / Sim->Q_e0);
+            //Sim->Species[lepton]->current_n[i] = 0.;
+            Sim->Species[lepton]->current_n[i] =(Sim->rho / (2.*m_e)) * (I(Sim->Species[lepton]->gamma[i],Sim->min_gamma, Sim->max_gamma, Sim->init_power, Sim) / Sim->Q_e0);
         }
     }
 }
@@ -167,7 +168,7 @@ void save_data(FILE *file, SimulationParams *Sim)
                                   "%lf,",
                                   Sim->t);
 
-    for (int i = 0; i < Sim->array_len; i++)
+    for (int i = 0; i < Sim->array_len+1; i++)
     {
         required_space += snprintf(Sim->buffer + (*Sim->buffer_index) + required_space, buffer_space - required_space,
                                    "%e,",
@@ -201,23 +202,23 @@ void save_data(FILE *file, SimulationParams *Sim)
 void simulate(FILE *file, SimulationParams *Sim)
 {
     set_initial_state(Sim);
-    save_data(file, Sim);
     Sim->t = 0.;
+    save_data(file, Sim);
     while (Sim->t < Sim->end_t)
     {
         for (int32_t i = 0; i < Sim->n_species; i++)
         {
             iteration(Sim, Sim->Species[i]);
             Sim->t += Sim->dt;
-            save_data(file, Sim);
         }
     }
+    save_data(file, Sim);
 }
 
 void calc_S(SimulationParams *Sim)
 {
     // calculate S
-    Sim->S = -(4. / 3.) * c * sigma_t * (Sim->B * Sim->B / (2 * m_e * c * c));
+    Sim->S = - 2.9e-9 * (Sim->B * Sim->B);
 }
 
 int main()
@@ -228,15 +229,14 @@ int main()
     Sim->max_gamma = 1e8;
     Sim->init_power = 2.;
     Sim->samples_per_decade = 40;
-    Sim->dt = 1000.;
-    Sim->end_t = 10000000.;
+    Sim->dt = 2500.;
+    Sim->end_t = 1e7;
 
     Sim->inject_min = 1e4;
     Sim->inject_max = 1e8;
     Sim->inject_power = 2.3;
     Sim->R = 1e16;
     Sim->L = 1e30;
-    Sim->B = 0.1;
     Sim->rho = 1e-38;
     malloc_Sim_Species_arrays(Sim);
 
@@ -259,23 +259,23 @@ int main()
     // calculate free escape time 
     Sim->tau_esc = (3. / 4.) * (Sim->R / c);
 
-    printf("norm_f%e, Q_e0%e, C%e, V%e, c%e \n", Sim->norm, Sim->Q_e0, Sim->Q_e0 * Sim->norm, volume, c);
+    printf("C %e, tau %e\n", Sim->Q_e0 * Sim->norm, Sim->tau_esc);
     
     double B[6] = {0.1,0.25,0.5,1.,1.5,2.};
     for (int i =0; i < 6; i++)
     {
         Sim->B = B[i];
         calc_S(Sim);
-        printf("%lf\n", Sim->B);
+        printf("B %.2lf, S %e\n", Sim->B, Sim->S);
         char filename[20];
-        sprintf(filename, "B%3.0lf.csv", Sim->B*100.);
+        sprintf(filename, "csv_data/B%4.0lf.csv", Sim->B*1000.);
         
         FILE *file = fopen(filename, "w");
         // print headers in csv file
         fprintf(file, "gamma,");
-        for (int64_t i = 0; i < Sim->array_len; i++)
+        for (int64_t i = 0; i < Sim->array_len+1; i++)
         {
-            fprintf(file, "%lf,", Sim->Species[0]->g[i]);
+            fprintf(file, "%lf,", Sim->Species[0]->gamma[i]);
         }
         fprintf(file, "\n");
         fflush(file);
@@ -287,13 +287,13 @@ int main()
         fclose(file);
     }
     
-
-    FILE *file = fopen("simulation_data.csv", "w");
+    Sim->B = 0.1;
+    FILE *file = fopen("csv_data/simulation_data.csv", "w");
     // print headers in csv file
     fprintf(file, "gamma,");
     for (int64_t i = 0; i < Sim->array_len; i++)
     {
-        fprintf(file, "%lf,", Sim->Species[0]->g[i]);
+        fprintf(file, "%lf,", Sim->Species[0]->gamma[i]);
     }
     fprintf(file, "\n");
     fflush(file);

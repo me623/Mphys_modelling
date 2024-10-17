@@ -18,7 +18,7 @@ typedef struct LeptonParams
 {
     double *current_lnn;
     double *next_lnn;
-    double *g;
+    double *gamma;
     double *ln_g;
     double dln_g;
 } LeptonParams;
@@ -102,14 +102,14 @@ void malloc_and_fill_gamma_array(SimulationParams *Sim, LeptonParams *Lepton)
 
     printf("%lld\n", Sim->array_len);
     // malloc the gamma and ln_gamma arrays
-    Lepton->g = calloc(Sim->array_len + 1, sizeof(double));
+    Lepton->gamma = calloc(Sim->array_len + 1, sizeof(double));
     Lepton->ln_g = calloc(Sim->array_len + 1, sizeof(double));
 
     // set the gamma values
     for (int64_t i = 0; i < Sim->array_len + 1; i++)
     {
-        Lepton->g[i] = pow(10., log10(Sim->min_gamma) + (double)i / (double)Sim->samples_per_decade);
-        Lepton->ln_g[i] = log(Lepton->g[i]);
+        Lepton->gamma[i] = pow(10., log10(Sim->min_gamma) + (double)i / (double)Sim->samples_per_decade);
+        Lepton->ln_g[i] = log(Lepton->gamma[i]);
     }
     // calculate delta ln gamma
     Lepton->dln_g = Lepton->ln_g[1] - Lepton->ln_g[0];
@@ -137,7 +137,7 @@ void free_Sim_Species_array(SimulationParams *Sim)
     {
         free(Sim->Species[i]->next_lnn);
         free(Sim->Species[i]->current_lnn);
-        free(Sim->Species[i]->g);
+        free(Sim->Species[i]->gamma);
         free(Sim->Species[i]->ln_g);
         free(Sim->Species[i]);
     }
@@ -165,22 +165,22 @@ void iteration(SimulationParams *Sim, LeptonParams *Lepton)
     {
         // pre calculate lambertW
         Sim->lambertW = lambertW(
-            -1. * ((I(Lepton->g[i], Sim->inject_min, Sim->inject_max, Sim->inject_power, Sim) * Sim->dt * Lepton->dln_g * exp(
-                -1. * ((2. * Sim->S * Sim->tau_esc * Sim->dt * Lepton->g[i] * Lepton->dln_g 
-                + Sim->S * Sim->tau_esc * Sim->dt * Lepton->g[i] * Lepton->next_lnn[i + 1] 
+            -1. * ((I(Lepton->gamma[i], Sim->inject_min, Sim->inject_max, Sim->inject_power, Sim) * Sim->dt * Lepton->dln_g * exp(
+                -1. * ((2. * Sim->S * Sim->tau_esc * Sim->dt * Lepton->gamma[i] * Lepton->dln_g 
+                + Sim->S * Sim->tau_esc * Sim->dt * Lepton->gamma[i] * Lepton->next_lnn[i + 1] 
                 - Sim->tau_esc * Lepton->current_lnn[i] * Lepton->dln_g 
                 + Lepton->dln_g * Sim->dt) 
                 / 
-                (Sim->tau_esc * (Sim->S * Sim->dt * Lepton->g[i] - Lepton->dln_g))))) 
+                (Sim->tau_esc * (Sim->S * Sim->dt * Lepton->gamma[i] - Lepton->dln_g))))) 
             /
-            (Sim->S * Sim->dt * Lepton->g[i] - Lepton->dln_g)));
+            (Sim->S * Sim->dt * Lepton->gamma[i] - Lepton->dln_g)));
 
         // stepping regime
         Lepton->next_lnn[i] =
-            (1. / (Sim->tau_esc * (Sim->S * Sim->dt * Lepton->g[i] - Lepton->dln_g))) 
-            * (Sim->lambertW * Sim->S * Sim->tau_esc * Sim->dt * Lepton->g[i] 
-            + Sim->S * Sim->tau_esc * Sim->dt * Lepton->g[i] * Lepton->next_lnn[i + 1] 
-            + 2. * Sim->S * Sim->tau_esc * Sim->dt * Lepton->g[i] * Lepton->dln_g 
+            (1. / (Sim->tau_esc * (Sim->S * Sim->dt * Lepton->gamma[i] - Lepton->dln_g))) 
+            * (Sim->lambertW * Sim->S * Sim->tau_esc * Sim->dt * Lepton->gamma[i] 
+            + Sim->S * Sim->tau_esc * Sim->dt * Lepton->gamma[i] * Lepton->next_lnn[i + 1] 
+            + 2. * Sim->S * Sim->tau_esc * Sim->dt * Lepton->gamma[i] * Lepton->dln_g 
             - Sim->lambertW * Sim->tau_esc * Lepton->dln_g 
             - Sim->tau_esc * Lepton->current_lnn[i] * Lepton->dln_g 
             + Lepton->dln_g * Sim->dt);
@@ -199,7 +199,7 @@ void set_initial_state(SimulationParams *Sim)
         for (int64_t i = 0; i < Sim->array_len; i++)
         {
             // set initial power law dist based on the background density
-            Sim->Species[lepton]->current_lnn[i] = log((Sim->rho / m_e) * (I(Sim->Species[lepton]->g[i], Sim->min_gamma, Sim->max_gamma, Sim->init_power, Sim) / Sim->Q_e0));
+            Sim->Species[lepton]->current_lnn[i] = log((Sim->rho / m_e) * (I(Sim->Species[lepton]->gamma[i], Sim->min_gamma, Sim->max_gamma, Sim->init_power, Sim) / Sim->Q_e0));
         }
     }
 }
@@ -335,7 +335,7 @@ int main()
         fprintf(file, "gamma,");
         for (int64_t i = 0; i < Sim->array_len; i++)
         {
-            fprintf(file, "%lf,", Sim->Species[0]->g[i]);
+            fprintf(file, "%lf,", Sim->Species[0]->gamma[i]);
         }
         fprintf(file, "\n");
         fflush(file);
@@ -348,12 +348,12 @@ int main()
     }
     */
 
-    FILE *file = fopen("log_step_simulation_data.csv", "w");
+    FILE *file = fopen("csv_data\log_step_simulation_data.csv", "w");
     // print headers in csv file
     fprintf(file, "gamma,");
     for (int64_t i = 0; i < Sim->array_len; i++)
     {
-        fprintf(file, "%lf,", Sim->Species[0]->g[i]);
+        fprintf(file, "%lf,", Sim->Species[0]->gamma[i]);
     }
     fprintf(file, "\n");
     fflush(file);
