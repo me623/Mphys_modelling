@@ -115,7 +115,7 @@ void malloc_and_fill_gamma_array(SimulationParams *Sim, LeptonParams *Lepton)
     Lepton->dln_g = Lepton->ln_g[1] - Lepton->ln_g[0];
 }
 
-void malloc_Sim_Species_arrays(SimulationParams *Sim)
+void malloc_Sim_arrays(SimulationParams *Sim)
 {
     Sim->Species = malloc(Sim->n_species * sizeof(LeptonParams *));
     Sim->buffer = malloc(BUFFER_SIZE * sizeof(char));
@@ -131,7 +131,7 @@ void malloc_Sim_Species_arrays(SimulationParams *Sim)
     }
 }
 
-void free_Sim_Species_array(SimulationParams *Sim)
+void free_Sim_arrays(SimulationParams *Sim)
 {
     for (int32_t i = 0; i < Sim->n_species; i++)
     {
@@ -297,7 +297,7 @@ int main()
     Sim->L = 1e30;
     Sim->B = 0.01;
     Sim->rho = 1e-38;
-    malloc_Sim_Species_arrays(Sim);
+    malloc_Sim_arrays(Sim);
 
     calc_S(Sim);
 
@@ -348,7 +348,7 @@ int main()
     }
     */
 
-    FILE *file = fopen("csv_data\log_step_simulation_data.csv", "w");
+    FILE *file = fopen("csv_data/log_step_simulation_data.csv", "w");
     // print headers in csv file
     fprintf(file, "gamma,");
     for (int64_t i = 0; i < Sim->array_len; i++)
@@ -363,7 +363,7 @@ int main()
     // flush remaining data in buffer to be written
     flush_buffer(file, Sim->buffer, Sim->buffer_index);
     fclose(file);
-    free_Sim_Species_array(Sim);
+    free_Sim_arrays(Sim);
     free(Sim);
 
     return 0;
