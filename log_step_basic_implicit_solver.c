@@ -159,7 +159,7 @@ double I(double gamma, double min, double max, double power, SimulationParams *S
     }
 }
 
-void iteration(SimulationParams *Sim, LeptonParams *Lepton)
+void implicit_step(SimulationParams *Sim, LeptonParams *Lepton)
 {
     for (int64_t i = Sim->array_len - 1; i >= 0; i--)
     {
@@ -264,7 +264,7 @@ void simulate(FILE *file, SimulationParams *Sim)
     {
         for (int32_t i = 0; i < Sim->n_species; i++)
         {
-            iteration(Sim, Sim->Species[i]);
+            implicit_step(Sim, Sim->Species[i]);
             Sim->t += Sim->dt;
             save_data(file, Sim);
         }
