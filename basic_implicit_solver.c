@@ -381,7 +381,7 @@ int main()
     Sim->min_gamma = 1e1;
     Sim->max_gamma = 1e8;
     Sim->init_power = 2.;
-    Sim->samples_per_decade = 40;
+    Sim->samples_per_decade = 20;
     Sim->dt = 10000.;
     Sim->end_t = 1e10;
     // free params

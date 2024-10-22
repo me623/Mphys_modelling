@@ -183,7 +183,7 @@ void set_initial_state(SimulationParams *Sim)
 void impose_BCs(SimulationParams *Sim,LeptonParams *Lepton)
 {
     Lepton->n[0] = Lepton->n[1];
-    Lepton->n[Sim->array_len+1] = 0.;
+    Lepton->n[Sim->array_len+1] = Lepton->n[Sim->array_len];
 }
 
 // file writing code
@@ -358,7 +358,7 @@ void simulate(FILE *file, SimulationParams *Sim)
         for (int32_t i = 0; i < Sim->n_species; i++)
         {
             save_step_to_prev_n(Sim, Sim->Species[i]);
-            bda_step(Sim, Sim->Species[i]);
+            fda_step(Sim, Sim->Species[i]);
             equilibrium_check(Sim, Sim->Species[i]);
             impose_BCs(Sim, Sim->Species[i]);
 
@@ -411,7 +411,7 @@ int main()
     Sim->min_gamma = 1e1;
     Sim->max_gamma = 1e8;
     Sim->init_power = 2.;
-    Sim->samples_per_decade = 40;
+    Sim->samples_per_decade = 200;
     // free params
     Sim->inject_min = 1e4;
     Sim->inject_max = 1e8;
@@ -421,8 +421,8 @@ int main()
     Sim->L = 1e30;
     Sim->rho = 1e-38;
     Sim->end_tol = 1e-8;
-    Sim->max_iter = 10;
-    
+    Sim->max_iter = 1;
+
     malloc_Sim_arrays(Sim);
 
     // generate the cooling test data

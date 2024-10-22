@@ -174,15 +174,9 @@ void set_initial_state(SimulationParams *Sim)
             
             // get ready for injection
             normalize_power_law_dist(Sim->inject_power, Sim);
-            //Sim->Species[lepton]->current_n[i] = 0.;
+            //Sim->Species[lepton]->n[i] = 0.;
         }
     }
-}
-
-void impose_BCs(SimulationParams *Sim,LeptonParams *Lepton)
-{
-    Lepton->n[0] = Lepton->n[1];
-    Lepton->n[Sim->array_len+1] = 0.;
 }
 
 // file writing code
@@ -268,42 +262,27 @@ void cda_step(SimulationParams *Sim, LeptonParams *Lepton)
     for (int64_t i = 1; i <= Sim->array_len; i++)
     {
         // explicit stepping regime
-        Lepton->n[i] = (Sim->tau_esc * (Sim->S * Lepton->gamma[i-1] * Lepton->gamma[i-1] * Lepton->prev_n[i-1]
-        - Sim->S * Lepton->gamma[i+1] * Lepton->gamma[i+1] * Lepton->prev_n[i+1]
-        + 2 * Lepton->delta_gamma[i] * I(Lepton->gamma[i], Sim->inject_min, Sim->inject_max, Sim->inject_power, Sim)))
-        /
-        (2 * Lepton->delta_gamma[i]);
-        
-        //Lepton->n[i+1] = (Sim->S * Sim->tau_esc * Lepton->gamma[i] * Lepton->gamma[i] * Lepton->prev_n[i]
-        //+ Sim->tau_esc * Lepton->delta_gamma[i] * I(Lepton->gamma[i], Sim->inject_min, Sim->inject_max, Sim->inject_power, Sim)
-        //- Lepton->delta_gamma[i] * Lepton->prev_n[i])
-        // /
-        //(Sim->tau_esc * Sim->S * Lepton->delta_gamma[i+1] * Lepton->delta_gamma[i+1]);
+        Lepton->n[i] = 
+        (Sim->tau_esc * 
+        (Sim->S * Lepton->gamma[i] * Lepton->prev_n[i-1]
+        - Sim->S * Lepton->gamma[i] * Lepton->prev_n[i+1]
+        + 2. * Lepton->delta_ln_gamma * I(Lepton->gamma[i], Sim->inject_min, Sim->inject_max, Sim->inject_power, Sim)))
+         /
+        (2. * Lepton->delta_ln_gamma * (1. + 2. * Sim->S * Sim->tau_esc));
     }
 }
 
 void fda_step(SimulationParams *Sim, LeptonParams *Lepton)
 {
-    for (int64_t i = Sim->array_len; i >= 1; i--)
-    {
-        // explicit stepping regime      
-        Lepton->n[i] = (Sim->tau_esc * Sim->S * Sim->tau_esc * Lepton->gamma[i+1] * Lepton->gamma[i+1] * Lepton->n[i+1]
-        - Sim->tau_esc * Lepton->delta_gamma[i] * I(Lepton->gamma[i], Sim->inject_min, Sim->inject_max, Sim->inject_power, Sim))
-         /
-        (Sim->tau_esc * Sim->S * Lepton->gamma[i+1] * Lepton->gamma[i+1] - Lepton->delta_gamma[i]);
-    }
-}
-
-void bda_step(SimulationParams *Sim, LeptonParams *Lepton)
-{
     for (int64_t i = 1; i <= Sim->array_len; i++)
     {
-        Lepton->delta_gamma[i] = Lepton->gamma[i] - Lepton->gamma[i-1];
-        // explicit stepping regime      
-        Lepton->n[i] = (Sim->tau_esc * Sim->S * Sim->tau_esc * Lepton->gamma[i-1] * Lepton->gamma[i-1] * Lepton->n[i-1]
-        - Sim->tau_esc * Lepton->delta_gamma[i] * I(Lepton->gamma[i], Sim->inject_min, Sim->inject_max, Sim->inject_power, Sim))
+        // explicit stepping regime
+        Lepton->n[i] = 
+        (Sim->tau_esc * 
+        (Sim->S * Lepton->gamma[i] * Lepton->prev_n[i+1]
+        - 2. * Lepton->delta_ln_gamma * I(Lepton->gamma[i], Sim->inject_min, Sim->inject_max, Sim->inject_power, Sim)))
          /
-        (Sim->tau_esc * Sim->S * Lepton->gamma[i] * Lepton->gamma[i] - Lepton->delta_gamma[i]);
+        (-2. * Sim->S * Sim->tau_esc * Lepton->delta_ln_gamma + Sim->S * Sim->tau_esc * Lepton->gamma[i] - Lepton->delta_ln_gamma);
     }
 }
 
@@ -333,6 +312,12 @@ void equilibrium_check(SimulationParams *Sim, LeptonParams *Lepton)
         printf("equilibrium reached at step:%lld, last change: %e\n", Sim->iter, Sim->change);
         Sim->end_sim=true;
     }
+}
+
+void impose_BCs(SimulationParams *Sim,LeptonParams *Lepton)
+{
+    Lepton->n[0] = Lepton->n[1];
+    Lepton->n[Sim->array_len+1] = 0.;
 }
 
 void simulate(FILE *file, SimulationParams *Sim)
@@ -410,7 +395,7 @@ int main()
     Sim->min_gamma = 1e1;
     Sim->max_gamma = 1e8;
     Sim->init_power = 2.;
-    Sim->samples_per_decade = 40;
+    Sim->samples_per_decade = 20;
     // free params
     Sim->inject_min = 1e4;
     Sim->inject_max = 1e8;
@@ -445,7 +430,7 @@ int main()
     }
     
     Sim->B = hold_B;
-    FILE *file2 = fopen("csv_data/simulation_data.csv", "w");
+    FILE *file2 = fopen("csv_data/steady_state/simulation_data.csv", "w");
     write_gammas_to_file(file2, Sim);
 
     simulate(file2, Sim);
