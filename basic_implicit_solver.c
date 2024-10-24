@@ -157,7 +157,7 @@ void set_initial_state(SimulationParams *Sim)
             / Sim->Q_e0);
             
             normalize_power_law_dist(Sim->inject_power, Sim);
-            //Sim->Species[lepton]->current_n[i] = 0.;
+            //Sim->Species[lepton]->current_n[i] = 1.;
         }
     }
 }
@@ -381,9 +381,9 @@ int main()
     Sim->min_gamma = 1e1;
     Sim->max_gamma = 1e8;
     Sim->init_power = 2.;
-    Sim->samples_per_decade = 20;
-    Sim->dt = 10000.;
-    Sim->end_t = 1e10;
+    Sim->samples_per_decade = 200;
+    Sim->dt = 1000.;
+    Sim->end_t = 1e7;
     // free params
     Sim->inject_min = 1e4;
     Sim->inject_max = 1e8;

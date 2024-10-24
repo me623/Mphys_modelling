@@ -378,12 +378,12 @@ void write_run_file(SimulationParams *Sim)
 
     FILE *file = fopen(filename, "w");
     fprintf(file, 
-    "dt,R,inject_p,inject_min,inject_max,rho,B,L,end_tol,Q_e0,S,tau_esc,norm,avg_gamma,V,array_len,max_gamma,min_gamma,init_p,samples_per_decade,final_time,change\n");
+    "delta_ln_gamma,R,inject_p,inject_min,inject_max,rho,B,L,end_tol,Q_e0,S,tau_esc,norm,avg_gamma,V,array_len,max_gamma,min_gamma,init_p,samples_per_decade,change\n");
     fprintf(file,
-    "%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%lld,%e,%e,%e,%lld\n",
-    Sim->R,Sim->inject_power,Sim->inject_min,Sim->inject_max,Sim->rho,Sim->B,Sim->L,
-    Sim->end_tol, Sim->Q_e0,Sim->S,Sim->tau_esc,Sim->norm,Sim->avg_gamma,Sim->V,
-    Sim->array_len,Sim->max_gamma,Sim->min_gamma,Sim->init_power,Sim->samples_per_decade);
+    "%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%lld,%e,%e,%e,%lld\n",
+    Sim->Species[0]->delta_ln_gamma, Sim->R,Sim->inject_power,Sim->inject_min,Sim->inject_max,Sim->rho,Sim->B,Sim->L,
+    Sim->end_tol, Sim->Q_e0,Sim->S,Sim->tau_esc,Sim->norm,Sim->avg_gamma,Sim->V,Sim->array_len,
+    Sim->max_gamma,Sim->min_gamma,Sim->init_power,Sim->samples_per_decade, Sim->change);
     fclose(file);
 }
 
@@ -394,22 +394,23 @@ int main()
     Sim->n_species = 1.;
     Sim->min_gamma = 1e1;
     Sim->max_gamma = 1e8;
-    Sim->init_power = 2.;
-    Sim->samples_per_decade = 20;
+    Sim->init_power = 4.;
+    Sim->samples_per_decade = 40;
     // free params
     Sim->inject_min = 1e4;
     Sim->inject_max = 1e8;
     Sim->inject_power = 2.3;
-    Sim->B = 0.1;
+    Sim->B = 2.;
     Sim->R = 1e16;
     Sim->L = 1e30;
     Sim->rho = 1e-38;
     Sim->end_tol = 1e-8;
-    Sim->max_iter = 1;
+    Sim->max_iter = 100000;
     
     malloc_Sim_arrays(Sim);
 
     // generate the cooling test data
+    
     double hold_B = Sim->B;
     double B[6] = {0.1,0.25,0.5,1.,1.5,2.};
     for (int i =0; i < 6; i++)
@@ -430,6 +431,7 @@ int main()
     }
     
     Sim->B = hold_B;
+    /*
     FILE *file2 = fopen("csv_data/steady_state/simulation_data.csv", "w");
     write_gammas_to_file(file2, Sim);
 
@@ -437,8 +439,9 @@ int main()
 
     // flush remaining data in buffer to be written
     flush_buffer(file2, Sim->buffer, Sim->buffer_index);
+    write_run_file(Sim);
     fclose(file2);
-    
+    */
     // end program
     free_Sim_arrays(Sim);
     free(Sim);
