@@ -270,20 +270,20 @@ void save_step_to_prev_n(SimulationParams *Sim, LeptonParams *Lepton)
 bool equilibrium_check(SimulationParams *Sim, LeptonParams *Lepton)
 {
     Sim->change = 0.;
+    double dn;
     // calculate percentage change in n
     for (int64_t i = Sim->array_len - 1; i >= 0; i--)
     {
-        Sim->change += pow(
-            (1. / 
-            Lepton->current_n[i]) * ((Lepton->next_n[i]-Lepton->current_n[i]) / Sim->dt),
-             2.);
+        dn = (Lepton->next_n[i]-Lepton->current_n[i]) / Lepton->current_n[i];
+        Sim->change += pow(dn, 2.);
     }
+    Sim->change /= (Sim->dt * Sim->dt);
     Sim->change = sqrt(Sim->change);
     
     // check change in population against specified end tolerance
     if (Sim->change < Sim->end_tol)
     {
-        printf("equilibrium reached at t = %lf, last change %e\n", Sim->t, Sim->change);
+        printf("equilibrium reached at t = %e, last change %e\n", Sim->t, Sim->change);
         Sim->end_sim=true;
         return true;
     }
@@ -356,21 +356,25 @@ void write_gammas_to_file(FILE *file, SimulationParams *Sim)
     fflush(file);
 }
 
-void write_run_file(SimulationParams *Sim)
+void write_run_file(FILE *run_file, SimulationParams *Sim)
 {
-    char filename[30];
-    sprintf(filename, "csv_data/B%4.0lf_run.csv", Sim->B*1000.);
-
-    FILE *file = fopen(filename, "w");
-    fprintf(file, 
+    if (run_file == NULL) {
+        printf("Error: File pointer is NULL\n");
+        return;
+    }
+    if (Sim == NULL) {
+        printf("Error: SimulationParams pointer is NULL\n");
+        return;
+    }
+    
+    fprintf(run_file, 
     "dt,R,inject_p,inject_min,inject_max,rho,B,L,end_tol,Q_e0,S,tau_esc,norm,avg_gamma,V,array_len,max_gamma,min_gamma,init_p,samples_per_decade,final_time,change\n");
-    fprintf(file,
+    fprintf(run_file,
     "%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%lld,%e,%e,%e,%lld,%e,%e\n",
     Sim->dt,Sim->R,Sim->inject_power,Sim->inject_min,Sim->inject_max,Sim->rho,Sim->B, 
     Sim->L,Sim->end_tol, Sim->Q_e0,Sim->S,Sim->tau_esc,Sim->norm,Sim->avg_gamma,Sim->V,
     Sim->array_len,Sim->max_gamma,Sim->min_gamma,Sim->init_power,Sim->samples_per_decade,
     Sim->final_time,Sim->change);
-    fclose(file);
 }
 
 int main()
@@ -381,14 +385,14 @@ int main()
     Sim->min_gamma = 1e1;
     Sim->max_gamma = 1e8;
     Sim->init_power = 2.;
-    Sim->samples_per_decade = 200;
-    Sim->dt = 1000.;
-    Sim->end_t = 1e7;
+    Sim->samples_per_decade = 80;
+    Sim->dt = 250000.;
+    Sim->end_t = 1e12;
     // free params
     Sim->inject_min = 1e4;
     Sim->inject_max = 1e8;
     Sim->inject_power = 2.3;
-    Sim->B = 0.1;
+    Sim->B = 0.25;
     Sim->R = 1e16;
     Sim->L = 1e30;
     Sim->rho = 1e-38;
@@ -403,20 +407,26 @@ int main()
     {
         Sim->B = B[i];
         // generate file name based on B
-        char filename[20];
-        sprintf(filename, "csv_data/B%4.0lf.csv", Sim->B*1000.);
-        
-        FILE *file = fopen(filename, "w");
+        char filename[100], filepath[100], run_filepath[100];
+        sprintf(filename, "B%4.0lf.csv", Sim->B*1000.);
+        sprintf(filepath, "csv_data/%s", filename);
+        sprintf(run_filepath, "csv_data/runs/run_%s", filename);
+            
+        FILE *file = fopen(filepath, "w");
+        FILE *run_file = fopen(run_filepath, "w");
+
         // print gamma array in csv file as header
         write_gammas_to_file(file, Sim);
 
         simulate(file, Sim);
 
-        write_run_file(Sim);
+        write_run_file(run_file, Sim);
         fclose(file);
+        fclose(run_file);
     }
     
     Sim->B = hold_B;
+    /*
     FILE *file = fopen("csv_data/simulation_data.csv", "w");
     write_gammas_to_file(file, Sim);
 
@@ -425,10 +435,36 @@ int main()
     // flush remaining data in buffer to be written
     flush_buffer(file, Sim->buffer, Sim->buffer_index);
     fclose(file);
-    
+    */
+    /*
+    double param[6] = {5,10,20,40,80,120};
+    for (int i =0; i < 6; i++)
+    {
+        Sim->samples_per_decade = param[i];
+        malloc_and_fill_gamma_array(Sim, Sim->Species[0]);
+        // generate file name based on B
+        char filename[150], filepath[150], run_filepath[150];
+        sprintf(filename, "samples_pd%.0lld.csv", Sim->samples_per_decade);
+        sprintf(filepath, "csv_data/%s", filename);
+        sprintf(run_filepath, "csv_data/runs/run_%s", filename);
+            
+        FILE *file = fopen(filepath, "w");
+        FILE *run_file = fopen(run_filepath, "w");
+
+        // print gamma array in csv file as header
+        write_gammas_to_file(file, Sim);
+
+        simulate(file, Sim);
+
+        write_run_file(run_file, Sim);
+        fclose(file);
+        fclose(run_file);
+        free(Sim->Species[0]->gamma);
+        free(Sim->Species[0]->delta_gamma);
+    }
+    */
     // end program
     free_Sim_arrays(Sim);
     free(Sim);
-
     return 0;
 }

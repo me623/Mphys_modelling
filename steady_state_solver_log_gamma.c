@@ -264,8 +264,8 @@ void cda_step(SimulationParams *Sim, LeptonParams *Lepton)
         // explicit stepping regime
         Lepton->n[i] = 
         (Sim->tau_esc * 
-        (Sim->S * Lepton->gamma[i] * Lepton->prev_n[i-1]
-        - Sim->S * Lepton->gamma[i] * Lepton->prev_n[i+1]
+        (Sim->S * Lepton->gamma[i] * Lepton->n[i-1]
+        - Sim->S * Lepton->gamma[i] * Lepton->n[i+1]
         + 2. * Lepton->delta_ln_gamma * I(Lepton->gamma[i], Sim->inject_min, Sim->inject_max, Sim->inject_power, Sim)))
          /
         (2. * Lepton->delta_ln_gamma * (1. + 2. * Sim->S * Sim->tau_esc));
@@ -274,15 +274,16 @@ void cda_step(SimulationParams *Sim, LeptonParams *Lepton)
 
 void fda_step(SimulationParams *Sim, LeptonParams *Lepton)
 {
-    for (int64_t i = 1; i <= Sim->array_len; i++)
+    for (int64_t i =  Sim->array_len; i >= 1; i--)
     {
         // explicit stepping regime
         Lepton->n[i] = 
         (Sim->tau_esc * 
-        (Sim->S * Lepton->gamma[i] * Lepton->prev_n[i+1]
-        - 2. * Lepton->delta_ln_gamma * I(Lepton->gamma[i], Sim->inject_min, Sim->inject_max, Sim->inject_power, Sim)))
+        (Sim->S * Lepton->gamma[i+1] * Lepton->gamma[i+1] * Lepton->n[i+1]
+        - 2. * Lepton->gamma[i] * Lepton->delta_ln_gamma 
+        * I(Lepton->gamma[i], Sim->inject_min, Sim->inject_max, Sim->inject_power, Sim)))
          /
-        (-2. * Sim->S * Sim->tau_esc * Lepton->delta_ln_gamma + Sim->S * Sim->tau_esc * Lepton->gamma[i] - Lepton->delta_ln_gamma);
+        (Lepton->gamma[i] * (Sim->S * Sim->tau_esc * Lepton->gamma[i] - Lepton->delta_ln_gamma));
     }
 }
 
@@ -371,16 +372,16 @@ void write_gammas_to_file(FILE *file, SimulationParams *Sim)
     fflush(file);
 }
 
-void write_run_file(SimulationParams *Sim)
+void write_run_file(SimulationParams *Sim, char *filename)
 {
-    char filename[50];
-    sprintf(filename, "csv_data/steady_state/B%4.0lf_run.csv", Sim->B*1000.);
+    char filepath[100];
+    sprintf(filepath, "csv_data/steady_state/runs/run_%s", filename);
 
-    FILE *file = fopen(filename, "w");
+    FILE *file = fopen(filepath, "w");
     fprintf(file, 
     "delta_ln_gamma,R,inject_p,inject_min,inject_max,rho,B,L,end_tol,Q_e0,S,tau_esc,norm,avg_gamma,V,array_len,max_gamma,min_gamma,init_p,samples_per_decade,change\n");
     fprintf(file,
-    "%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%lld,%e,%e,%e,%lld\n",
+    "%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%lld,%e,%e,%e,%lld,%e\n",
     Sim->Species[0]->delta_ln_gamma, Sim->R,Sim->inject_power,Sim->inject_min,Sim->inject_max,Sim->rho,Sim->B,Sim->L,
     Sim->end_tol, Sim->Q_e0,Sim->S,Sim->tau_esc,Sim->norm,Sim->avg_gamma,Sim->V,Sim->array_len,
     Sim->max_gamma,Sim->min_gamma,Sim->init_power,Sim->samples_per_decade, Sim->change);
@@ -394,8 +395,8 @@ int main()
     Sim->n_species = 1.;
     Sim->min_gamma = 1e1;
     Sim->max_gamma = 1e8;
-    Sim->init_power = 4.;
-    Sim->samples_per_decade = 40;
+    Sim->init_power = 2.;
+    Sim->samples_per_decade = 100;
     // free params
     Sim->inject_min = 1e4;
     Sim->inject_max = 1e8;
@@ -405,7 +406,7 @@ int main()
     Sim->L = 1e30;
     Sim->rho = 1e-38;
     Sim->end_tol = 1e-8;
-    Sim->max_iter = 100000;
+    Sim->max_iter = 1000;
     
     malloc_Sim_arrays(Sim);
 
@@ -417,16 +418,17 @@ int main()
     {
         Sim->B = B[i];
         // generate file name based on B
-        char filename[30];
-        sprintf(filename, "csv_data/steady_state/B%4.0lf.csv", Sim->B*1000.);
-        
-        FILE *file = fopen(filename, "w");
+        char filename[100], filepath[100];
+        sprintf(filename, "B%4.0lf.csv", Sim->B*1000.);
+        sprintf(filepath, "csv_data/steady_state/%s", filename);
+
+        FILE *file = fopen(filepath, "w");
         // print gamma array in csv file as header
         write_gammas_to_file(file, Sim);
 
         simulate(file, Sim);
 
-        write_run_file(Sim);
+        write_run_file(Sim, filename);
         fclose(file);
     }
     
