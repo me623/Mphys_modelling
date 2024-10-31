@@ -243,14 +243,15 @@ void implicit_step(SimulationParams *Sim, LeptonParams *Lepton)
         // implicit stepping regime
         Lepton->next_n[i] =
         Sim->tau_esc * 
-        (Sim->S * Sim->dt * Lepton->gamma[i] * Lepton->next_n[i+1]
-        - Lepton->delta_gamma * Sim->dt * I(Lepton->gamma[i], Sim->inject_min, Sim->inject_max, Sim->inject_power, Sim)
-        - Lepton->delta_gamma * Lepton->current_n[i])
+        (Sim->S * Sim->dt * Lepton->gamma[i+1] * Lepton->gamma[i+1] * Lepton->next_n[i+1]
+        - Lepton->delta_gamma * Sim->dt * 
+          I(Lepton->gamma[i], Sim->inject_min, Sim->inject_max, Sim->inject_power, Sim) * Lepton->gamma[i]
+        - Lepton->delta_gamma * Lepton->gamma[i] * Lepton->current_n[i])
         /
-        (-2 * Sim->S * Lepton->delta_gamma * Sim->tau_esc * Sim->dt
-        +2 * Sim->S * Sim->tau_esc * Sim->dt * Lepton->gamma[i]
+        (Lepton->gamma[i] * 
+        (Sim->S* Sim->tau_esc * Sim->dt * Lepton->gamma[i]
         - Lepton->delta_gamma * Sim->tau_esc
-        - Lepton->delta_gamma * Sim->dt);
+        - Lepton->delta_gamma * Sim->dt));
     }
 }
 
@@ -375,13 +376,14 @@ void write_run_file(FILE *run_file, SimulationParams *Sim)
 
 int main()
 {
+    double hold;
     SimulationParams *Sim = malloc(sizeof(SimulationParams));
     // simulation setup
     Sim->n_species = 1.;
     Sim->min_gamma = 1e1;
     Sim->max_gamma = 1e8;
     Sim->init_power = 2.;
-    Sim->samples_per_decade = 10;
+    Sim->samples_per_decade = 40;
     Sim->dt = 10000.;
     Sim->end_t = 1e10;
     // free params
@@ -397,7 +399,8 @@ int main()
     malloc_Sim_arrays(Sim);
 
     // generate the cooling test data
-    double hold_B = Sim->B;
+    /*
+    hold = Sim->B;
     double B[6] = {0.1,0.25,0.5,1.,1.5,2.};
     for (int i =0; i < 6; i++)
     {
@@ -420,8 +423,9 @@ int main()
         fclose(file);
         fclose(run_file);
     }
-    /*
-    Sim->B = hold_B;
+    Sim->B = hold;
+    */
+   /*
     FILE *file = fopen("csv_data/simulation_data.csv", "w");
     write_gammas_to_file(file, Sim);
 
@@ -432,8 +436,9 @@ int main()
     fclose(file);
     */
     
-    double param[6] = {5,10,20,40,80,120};
-    for (int i =0; i < 6; i++)
+    hold = (double)Sim->samples_per_decade;
+    double param[5] = {5,10,20,30,40};
+    for (int i =0; i < 5; i++)
     {
         Sim->samples_per_decade = param[i];
         malloc_and_fill_gamma_array(Sim, Sim->Species[0]);
@@ -455,7 +460,36 @@ int main()
         fclose(file);
         fclose(run_file);
     }
-    
+    Sim->samples_per_decade = (int64_t)hold;
+
+    /*
+    hold = Sim->dt;
+    double param[5] = {1e4,2.5e4,5e4,1e5,2.5e5};
+    for (int i =0; i < 5; i++)
+    {
+        Sim->dt = param[i];
+        malloc_and_fill_gamma_array(Sim, Sim->Species[0]);
+        // generate file name based on B
+        char filename[150], filepath[150], run_filepath[150];
+        sprintf(filename, "dt%.0lf.csv", Sim->dt);
+        sprintf(filepath, "csv_data/%s", filename);
+        sprintf(run_filepath, "csv_data/runs/run_%s", filename);
+            
+        FILE *file = fopen(filepath, "w");
+        FILE *run_file = fopen(run_filepath, "w");
+
+        // print gamma array in csv file as header
+        write_gammas_to_file(file, Sim);
+
+        simulate(file, Sim);
+
+        write_run_file(run_file, Sim);
+        fclose(file);
+        fclose(run_file);
+    }
+    Sim->dt = hold;
+    */
+
     // end program
     free_Sim_arrays(Sim);
     free(Sim);

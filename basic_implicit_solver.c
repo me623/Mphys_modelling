@@ -385,7 +385,7 @@ int main()
     Sim->min_gamma = 1e1;
     Sim->max_gamma = 1e8;
     Sim->init_power = 2.;
-    Sim->samples_per_decade = 80;
+    Sim->samples_per_decade = 10;
     Sim->dt = 250000.;
     Sim->end_t = 1e12;
     // free params
@@ -436,8 +436,8 @@ int main()
     flush_buffer(file, Sim->buffer, Sim->buffer_index);
     fclose(file);
     */
-    /*
-    double param[6] = {5,10,20,40,80,120};
+    
+    double param[6] = {5,10,20,40,80,120}, u;
     for (int i =0; i < 6; i++)
     {
         Sim->samples_per_decade = param[i];
@@ -447,7 +447,7 @@ int main()
         sprintf(filename, "samples_pd%.0lld.csv", Sim->samples_per_decade);
         sprintf(filepath, "csv_data/%s", filename);
         sprintf(run_filepath, "csv_data/runs/run_%s", filename);
-            
+
         FILE *file = fopen(filepath, "w");
         FILE *run_file = fopen(run_filepath, "w");
 
@@ -462,7 +462,7 @@ int main()
         free(Sim->Species[0]->gamma);
         free(Sim->Species[0]->delta_gamma);
     }
-    */
+    
     // end program
     free_Sim_arrays(Sim);
     free(Sim);

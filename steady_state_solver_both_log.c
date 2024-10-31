@@ -443,7 +443,7 @@ int main()
     Sim->L = 1e30;
     Sim->rho = 1e-38;
     Sim->end_tol = 1e-8;
-    Sim->max_iter = 1;
+    Sim->max_iter = 2;
     
     malloc_Sim_arrays(Sim);
 
