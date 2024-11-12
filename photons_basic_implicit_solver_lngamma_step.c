@@ -61,8 +61,8 @@ typedef struct SimulationParams
     double V;           // volume of system (spherical based on R)   
 
     // code specific values
-    LeptonParams *ElectronPop;
-    PhotonParams *PhotonPop;
+    LeptonParams *Electrons;
+    PhotonParams *Photons;
     double change;
     bool end_sim;
     int64_t iter;
@@ -124,26 +124,26 @@ void malloc_and_fill_frequency_array(SimulationParams *Sim, PhotonParams *Photon
 
 void malloc_Sim_arrays(SimulationParams *Sim)
 {
-    Sim->ElectronPop = malloc(sizeof(LeptonParams));
-    malloc_and_fill_gamma_array(Sim, Sim->ElectronPop);
-    Sim->ElectronPop->current_n = malloc((Sim->array_len + 1) * sizeof(double));
-    Sim->ElectronPop->next_n = malloc((Sim->array_len + 1) * sizeof(double));
+    Sim->Electrons = malloc(sizeof(LeptonParams));
+    malloc_and_fill_gamma_array(Sim, Sim->Electrons);
+    Sim->Electrons->current_n = malloc((Sim->array_len + 1) * sizeof(double));
+    Sim->Electrons->next_n = malloc((Sim->array_len + 1) * sizeof(double));
 
-    Sim->PhotonPop = malloc(sizeof(PhotonParams));
-    malloc_and_fill_frequency_array(Sim, Sim->PhotonPop);
-    Sim->PhotonPop->n = calloc((Sim->array_len + 1), sizeof(double));
+    Sim->Photons = malloc(sizeof(PhotonParams));
+    malloc_and_fill_frequency_array(Sim, Sim->Photons);
+    Sim->Photons->n = calloc((Sim->array_len + 1), sizeof(double));
 }
 
 void free_Sim_arrays(SimulationParams *Sim)
 {
-    free(Sim->ElectronPop->current_n);
-    free(Sim->ElectronPop->next_n);
-    free(Sim->ElectronPop->gamma);
-    free(Sim->ElectronPop);
-    free(Sim->PhotonPop->n);
-    free(Sim->PhotonPop->frequency);
-    free(Sim->PhotonPop->delta_freq);
-    free(Sim->PhotonPop);
+    free(Sim->Electrons->current_n);
+    free(Sim->Electrons->next_n);
+    free(Sim->Electrons->gamma);
+    free(Sim->Electrons);
+    free(Sim->Photons->n);
+    free(Sim->Photons->frequency);
+    free(Sim->Photons->delta_freq);
+    free(Sim->Photons);
 }
 
 double I(double gamma, double min, double max, double power, SimulationParams *Sim)
@@ -170,16 +170,16 @@ void normalize_power_law_dist(double power, SimulationParams *Sim)
 
 void set_initial_state(SimulationParams *Sim)
 {
-    Sim->ElectronPop->next_n[Sim->array_len] = 0.;
+    Sim->Electrons->next_n[Sim->array_len] = 0.;
     for (int64_t i = 0; i < Sim->array_len; i++)
     {
         normalize_power_law_dist(Sim->init_power, Sim);
         
         // set initial population on a selected power law
         // number of photons included based on background density
-        Sim->ElectronPop->current_n[i] =
+        Sim->Electrons->current_n[i] =
         (Sim->rho / (2.*m_e)) * 
-        (I(Sim->ElectronPop->gamma[i], Sim->min_gamma, Sim->max_gamma, Sim->init_power, Sim) 
+        (I(Sim->Electrons->gamma[i], Sim->min_gamma, Sim->max_gamma, Sim->init_power, Sim) 
         / Sim->Q_e0);
         
         normalize_power_law_dist(Sim->inject_power, Sim);
@@ -419,7 +419,7 @@ void simulate(char *filepath, SimulationParams *Sim)
 
     char header[100];
     // write gammas to csv
-    write_column_to_csv(filepath, Sim->ElectronPop->gamma, Sim->array_len+1, "gamma");
+    write_column_to_csv(filepath, Sim->Electrons->gamma, Sim->array_len+1, "gamma");
     
     // take input params and calculate coefficients
     calc_S(Sim);
@@ -443,34 +443,34 @@ void simulate(char *filepath, SimulationParams *Sim)
     Sim->Q_e0 * Sim->norm, Sim->tau_esc, Sim->B, Sim->S, Sim->array_len);
     // write initial state to file
     sprintf(header, "n_e t=%e", Sim->t);
-    write_column_to_csv(filepath, Sim->ElectronPop->current_n, Sim->array_len+1, header);
+    write_column_to_csv(filepath, Sim->Electrons->current_n, Sim->array_len+1, header);
     while (Sim->t < Sim->end_t && Sim->end_sim == false)
     {
-        implicit_step(Sim, Sim->ElectronPop);
+        implicit_step(Sim, Sim->Electrons);
 
-        equilibrium_check(Sim, Sim->ElectronPop);
+        equilibrium_check(Sim, Sim->Electrons);
 
-        save_step_to_prev_n(Sim, Sim->ElectronPop);
+        save_step_to_prev_n(Sim, Sim->Electrons);
         Sim->t += Sim->dt;
         Sim->iter ++;
         if ((Sim->t > 1e6 && Sim->iter == 50) || (Sim->t > 1e5 && Sim->iter == 5 && Sim->t < 1e6) || Sim->t < 1e5)
         {
             sprintf(header, "n_e t=%e", Sim->t);
-            write_column_to_csv(filepath, Sim->ElectronPop->current_n, Sim->array_len+1, header);
+            write_column_to_csv(filepath, Sim->Electrons->current_n, Sim->array_len+1, header);
             Sim->iter = 0;
         }
     }
 
     Sim->final_time=Sim->t;
     sprintf(header, "n_e final", Sim->t);
-    write_column_to_csv(filepath, Sim->ElectronPop->current_n, Sim->array_len+1, header);
+    write_column_to_csv(filepath, Sim->Electrons->current_n, Sim->array_len+1, header);
 
     // generate photon population
-    photon_calc(Sim->ElectronPop, Sim->PhotonPop, Sim);
+    photon_calc(Sim->Electrons, Sim->Photons, Sim);
     sprintf(header, "photon_freq");
-    write_column_to_csv(filepath, Sim->PhotonPop->frequency, Sim->array_len+1, header);
+    write_column_to_csv(filepath, Sim->Photons->frequency, Sim->array_len+1, header);
     sprintf(header, "photon_n");
-    write_column_to_csv(filepath, Sim->PhotonPop->n, Sim->array_len+1, header);
+    write_column_to_csv(filepath, Sim->Photons->n, Sim->array_len+1, header);
 }
 
 void write_gammas_to_file(FILE *file, SimulationParams *Sim)
@@ -479,7 +479,7 @@ void write_gammas_to_file(FILE *file, SimulationParams *Sim)
     fprintf(file, "gamma,");
     for (int64_t i = 0; i < Sim->array_len; i++)
     {
-        fprintf(file, "%lf,", Sim->ElectronPop->gamma[i]);
+        fprintf(file, "%lf,", Sim->Electrons->gamma[i]);
     }
     fprintf(file, "\n");
     fflush(file);

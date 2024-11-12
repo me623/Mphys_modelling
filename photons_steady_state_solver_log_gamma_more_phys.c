@@ -5,14 +5,19 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <float.h>
+#include <gsl/gsl_sf_hyperg.h>
 
 #define BUFFER_SIZE 33554432
 // CGS unit constants
 #define m_e 9.109e-28
 #define c 2.998e10
 #define sigma_t 6.652e-25
-#define q 4.803e-10
+#define q 4.803e-10 // charge of an electron in cgs
 #define h 6.626e-27
+#define h_bar 1.055e-27
+
+#define H0 2.27e-18 // Hubble constant in cgs
 
 typedef struct LeptonParams
 {
@@ -26,7 +31,7 @@ typedef struct PhotonParams
 {
     double *n;
     double *frequency;
-    double *delta_freq;
+    double *j_v;
 } PhotonParams;
 
 typedef struct SimulationParams
@@ -41,16 +46,16 @@ typedef struct SimulationParams
 
     // free parameters
     double R;       // radius of system (spherical geo)
-    double inject_power;// power law power
-    double init_power;  // power to generate initial distribution
+    double inject_power;// power law pre break
+    double inject_power_2;// power law post break
     double inject_min;  // injection gamma range min
+    double inject_break;
     double inject_max;  // injection gamma range max
     double rho;     // background density for initial population calc
     double B;       // background magnetic field
     double L;       // external luminosity
     double end_tol; // tolerance for change in n to count as equilibrium
     double bulk_gamma;
-    double dL;      // luminosity distance
     double z;       // redshift
 
     double Q_e0;    // starting population
@@ -59,6 +64,7 @@ typedef struct SimulationParams
     double norm;    // normalize the prob dist
     double avg_gamma;   // average gamma of injected dist for Q_e0 calc
     double V;           // volume of system (spherical based on R)   
+    double dL;          // distance to plasma system
     double doppler_factor;
 
 
@@ -102,7 +108,7 @@ void malloc_and_fill_frequency_array(SimulationParams *Sim, PhotonParams *Photon
     
     // malloc gamma and delta gamma arrays
     Photons->frequency = calloc(Sim->array_len + 2, sizeof(double));
-    Photons->delta_freq  = calloc(Sim->array_len + 2, sizeof(double));
+    Photons->j_v  = calloc(Sim->array_len + 2, sizeof(double));
 
     // fill gamma array with equal log step data
     for (int64_t i = 1; i <= Sim->array_len + 1; i++)
@@ -117,7 +123,7 @@ void malloc_and_fill_frequency_array(SimulationParams *Sim, PhotonParams *Photon
 
    for (int64_t i = 1; i <= Sim->array_len; i++)
     {
-        Photons->delta_freq[i] = Photons->frequency[i + 1] - Photons->frequency[i];
+        Photons->j_v[i] = Photons->frequency[i + 1] - Photons->frequency[i];
     }
 }
 
@@ -125,13 +131,12 @@ void malloc_Sim_arrays(SimulationParams *Sim)
 {
     Sim->Electrons = malloc(sizeof(LeptonParams));
     malloc_and_fill_gamma_array(Sim, Sim->Electrons);
-    Sim->Electrons->n = malloc((Sim->array_len + 2) * sizeof(double));
+    Sim->Electrons->n = calloc((Sim->array_len + 2), sizeof(double));
     Sim->Electrons->prev_n = malloc((Sim->array_len + 2) * sizeof(double));
 
     Sim->Photons = malloc(sizeof(PhotonParams));
     malloc_and_fill_frequency_array(Sim, Sim->Photons);
     Sim->Photons->n = calloc((Sim->array_len + 2), sizeof(double));
-
     Sim->vflux = calloc((Sim->array_len + 2), sizeof(double));
 }
 
@@ -143,53 +148,45 @@ void free_Sim_arrays(SimulationParams *Sim)
     free(Sim->Electrons);
     free(Sim->Photons->n);
     free(Sim->Photons->frequency);
-    free(Sim->Photons->delta_freq);
+    free(Sim->Photons->j_v);
     free(Sim->Photons);
     free(Sim->vflux);
 }
 
 
-double I(double gamma, double min, double max, double power, SimulationParams *Sim)
+double I(double gamma, SimulationParams *Sim)
 {
     // inject power law within a specified range
-    if (gamma < min || gamma > max)
+    if (gamma < Sim->inject_min || gamma > Sim->inject_max)
     {
         return 0.;
     }
+    if (gamma > Sim->inject_break)
+    {
+        return Sim->Q_e0 * Sim->norm * pow(gamma, (-1. * Sim->inject_power_2));
+    }
     else
     {
-        return Sim->Q_e0 * Sim->norm * pow(gamma, (-1. * power));
+        return Sim->Q_e0 * Sim->norm * pow(gamma, (-1. * Sim->inject_power));
     }
 }
 
-void normalize_power_law_dist(double power, SimulationParams *Sim)
+void normalize_power_law_dist(SimulationParams *Sim)
 {
+        Sim->norm = 1.;
+        Sim->Q_e0 = 1.;
+        double integral = 0.;
         // normalise power law dist based on a given power
-        Sim->norm =
-        1. / 
-        ((pow(Sim->max_gamma, 1. - power) / (1. - power)) 
-        - (pow(Sim->min_gamma, 1. - power) / (1. - power)));
+        for (int64_t i = 0; i < Sim->array_len + 1; i++)
+        {
+            integral += I(Sim->Electrons->gamma[i], Sim);
+        }
+        Sim->norm /= integral;
 }
 
 void set_initial_state(SimulationParams *Sim)
 {
-    for (int64_t i = 1; i <= Sim->array_len; i++)
-    {
-        // re-normalize dist for init power
-        normalize_power_law_dist(Sim->init_power, Sim);
-        
-        // set initial population on a selected power law
-        // number of photons included based on background density
-        Sim->Electrons->n[i] =
-        (Sim->rho / (2.*m_e)) * 
-        (I(Sim->Electrons->gamma[i], Sim->min_gamma, Sim->max_gamma, Sim->init_power, Sim) 
-        / Sim->Q_e0);
-        //printf("%e %e\n", Sim->Species[lepton]->gamma[i], Sim->Species[lepton]->n[i]);
-        
-        // get ready for injection
-        normalize_power_law_dist(Sim->inject_power, Sim);
-        //Sim->Species[lepton]->n[i] = 0.;
-    }
+    Sim->Electrons->n[Sim->array_len + 1] = 0.;
 }
 
 // file writing code
@@ -284,14 +281,14 @@ void calc_S(SimulationParams *Sim)
 
 void calc_Q_e0(SimulationParams *Sim)
 {
-    // calculate a pre-solved integral of gamma * gamma^-p
-    Sim->avg_gamma =
-        Sim->norm * (pow(Sim->inject_max, 2. - Sim->inject_power) / (2. - Sim->inject_power)) 
-        - Sim->norm * (pow(Sim->inject_min, 2. - Sim->inject_power) / (2. - Sim->inject_power));
-    // correct for divide by zero errors when p = 2
-    if (Sim->inject_power == 2.)
-        Sim->avg_gamma = Sim->norm * log(Sim->inject_max) - Sim->norm * log(Sim->inject_min);
+    // calculate average gamma
+    Sim->avg_gamma = 0.;
     
+    for (int64_t i = 0; i < Sim->array_len + 1; i++)
+    {
+        Sim->avg_gamma += Sim->Electrons->gamma[i] * I(Sim->Electrons->gamma[i], Sim);
+    }
+
     // calculate volume
     Sim->V = (4./3.) * M_PI * Sim->R * Sim->R * Sim->R;
     // calculate injected Qe0
@@ -319,7 +316,7 @@ void fda_step(SimulationParams *Sim, LeptonParams *Lepton)
         (Sim->tau_esc * 
         (Sim->S * Lepton->gamma[i+1] * Lepton->gamma[i+1] * Lepton->n[i+1]
         - Lepton->gamma[i] * Lepton->delta_ln_gamma 
-        * I(Lepton->gamma[i], Sim->inject_min, Sim->inject_max, Sim->inject_power, Sim)))
+        * I(Lepton->gamma[i], Sim)))
          /
         (Lepton->gamma[i] * (Sim->S * Sim->tau_esc * Lepton->gamma[i] - Lepton->delta_ln_gamma));
     }
@@ -348,74 +345,59 @@ void equilibrium_check(SimulationParams *Sim, LeptonParams *Lepton)
     // check change in population against specified end tolerance
     if (Sim->change < Sim->end_tol)
     {
-        printf("equilibrium reached at step:%lld, last change: %e\n", Sim->iter, Sim->change);
+        printf("equilibrium reached at step: %lld, last change: %e\n", Sim->iter, Sim->change);
         Sim->end_sim=true;
     }
 }
 
 void impose_BCs(SimulationParams *Sim, LeptonParams *Lepton)
 {
-    Lepton->n[0] = Lepton->n[1];
     Lepton->n[Sim->array_len+1] = 0.;
 }
 
-double P_sync(double x)
-{
-    return sqrt(3.) * pow((3. * x / 2.), 1./3.) * exp(-x);
+// Function to compute the Whittaker function W
+double W(double kappa, double mu, double z) {
+    // calculate a and b
+    double a = 0.5 + mu - kappa;
+    double b = 1.0 + 2.0 * mu;
+
+    // Compute the confluent hypergeometric function
+    double U_val = gsl_sf_hyperg_U(a, b, z);
+
+    double scaling_factor = exp(-0.5 * z) * pow(z, 0.5 + mu);
+
+    return scaling_factor * U_val;
 }
 
-double nu_cr(double gamma_e, double B)
+double CS(double x)
 {
-  double sina = 1.;
-  double omega_cr = gamma_e * gamma_e * B * 3. * q * sina / (2. * m_e * c);
-  return omega_cr / (2. * M_PI);
+    return W(0., 4./3., x) * W(0., 1./3., x) - W(1./2., 5./6., x) * W(-1./2., 5./6., x);
 }
 
-void photon_calc(LeptonParams *ElectronPop, PhotonParams *PhotonPop, SimulationParams *Sim)
+// critical frequency
+double vc(double gamma, SimulationParams *Sim)
 {
-    double max_val = 0.;
-    char header[100];
+    return ((3. * q * Sim->B) / (4. * M_PI * m_e * c)) * pow(gamma, 2.);
+}
 
-    // ensure photon pop is zero to start
+// energy emitted by a particle with energy gamma at frequency mu
+double Pv(double gamma, double freq, SimulationParams *Sim)
+{
+    double x = (freq / vc(gamma, Sim));
+    return ((sqrt(3.) * M_PI * pow(q, 3.) * Sim->B) / (2 * m_e * pow(c, 2.))) * x * CS(x);
+    
+}
+double jv(double freq, SimulationParams *Sim)
+{
+    double integral = 0.;
+    
     for (int64_t i = 1; i <= Sim->array_len; i++)
     {
-        PhotonPop->n[i] = 0.;
+        integral += Sim->Electrons->n[i] * Pv(Sim->Electrons->gamma[i], freq, Sim);
     }
-
-    // normalise the electron dist
-    for (int64_t i = 1; i <= Sim->array_len; i++)
-    {
-        if (ElectronPop->n[i] > max_val)
-        {
-            max_val = ElectronPop->n[i];
-        }
-    } 
-    for (int64_t i = 1; i <= Sim->array_len; i++)
-    {
-        ElectronPop->n[i] /= max_val;
-    } 
-
-    for (int64_t j = 1; j <= Sim->array_len; j++)
-    {
-        for (int64_t i = 1; i <= Sim->array_len; i++)
-        {
-            PhotonPop->n[i] += 
-            ElectronPop->n[j] * P_sync(PhotonPop->frequency[i] / nu_cr(ElectronPop->gamma[j], Sim->B));
-        }
-    }
-    max_val=0;
-    // normalise the dist
-    for (int64_t i = 1; i <= Sim->array_len; i++)
-    {
-        if (PhotonPop->n[i] > max_val)
-        {
-            max_val = PhotonPop->n[i];
-        }
-    } 
-    for (int64_t i = 1; i <= Sim->array_len; i++)
-    {
-        PhotonPop->n[i] /= max_val;
-    } 
+    integral /= (4. * M_PI);
+    
+    return integral;
 }
 
 double eps(double freq)
@@ -423,8 +405,30 @@ double eps(double freq)
     return (h * freq) / (m_e * c * c);
 }
 
+void photon_calc(LeptonParams *Electrons, PhotonParams *Photons, SimulationParams *Sim)
+{
+    double max_val = 0.;
+    char header[100];
+    double j_v;
+    for (int64_t i = 1; i <= Sim->array_len; i++)
+    {
+        j_v = jv(Photons->frequency[i], Sim);
+
+        Photons->n[i] = (2 * j_v) / (h_bar * eps(Photons->frequency[i]));
+        Photons->j_v[i] = j_v;
+    }  
+}
+
+// Function to calculate the luminosity distance
+double redshift_distance(double z) {
+    // approx for z < 1
+    return 1.32e28 * z;
+}
+
 void calc_flux(SimulationParams *Sim)
 {
+    Sim->dL = redshift_distance(Sim->z);
+
     for (int64_t i = 1; i <= Sim->array_len; i++)
     {
         Sim->vflux[i] = 
@@ -441,17 +445,16 @@ void simulate(char *filepath, SimulationParams *Sim)
     write_column_to_csv(filepath, Sim->Electrons->gamma, Sim->array_len+2, "gamma");
     // take input params and calculate coefficients
     calc_S(Sim);
-    normalize_power_law_dist(Sim->inject_power, Sim);
+    normalize_power_law_dist(Sim);
     calc_Q_e0(Sim);
     calc_tau_esc(Sim);
-    calc_doppler_factor(Sim);
 
     set_initial_state(Sim);
     impose_BCs(Sim, Sim->Electrons);
 
     // start simulation
-    printf("Start Sim with C %e, tau %e B %.2lf, S %e g_array %lld\n", 
-    Sim->Q_e0 * Sim->norm, Sim->tau_esc, Sim->B, Sim->S, Sim->array_len);
+    printf("Start Sim with C %e, tau %e B %.2lf, S %e g_array %lld, minject%e\n", 
+    Sim->Q_e0 * Sim->norm, Sim->tau_esc, Sim->B, Sim->S, Sim->array_len, Sim->inject_min);
     
     Sim->end_sim = false;
     Sim->iter = 0;
@@ -480,9 +483,13 @@ void simulate(char *filepath, SimulationParams *Sim)
     write_column_to_csv(filepath, Sim->Photons->frequency, Sim->array_len+2, header);
     sprintf(header, "photon_n");
     write_column_to_csv(filepath, Sim->Photons->n, Sim->array_len+2, header);
+    sprintf(header, "j_v");
+    write_column_to_csv(filepath, Sim->Photons->j_v, Sim->array_len+2, header);
     calc_flux(Sim);
     sprintf(header, "vflux");
     write_column_to_csv(filepath, Sim->vflux, Sim->array_len+2, header);
+
+    printf("%e, distance pc\n", Sim->dL);
 }
 
 void write_run_file(SimulationParams *Sim, char *filename)
@@ -492,12 +499,15 @@ void write_run_file(SimulationParams *Sim, char *filename)
 
     FILE *file = fopen(filepath, "w");
     fprintf(file, 
-    "delta_ln_gamma,R,inject_p,inject_min,inject_max,rho,B,L,end_tol,Q_e0,S,tau_esc,norm,avg_gamma,V,array_len,max_gamma,min_gamma,init_p,samples_per_decade,change\n");
+    "delta_ln_gamma,R,inject_p,inject_p2,inject_min,inject_break,inject_max,rho,B,L,end_tol,Q_e0,S,tau_esc,norm,avg_gamma,V,array_len,max_gamma,min_gamma,samples_per_decade,change,bulk_gamma,doppler_factor,z,\n");
     fprintf(file,
-    "%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%lld,%e,%e,%e,%lld,%e\n",
-    Sim->Electrons->delta_ln_gamma, Sim->R,Sim->inject_power,Sim->inject_min,Sim->inject_max,Sim->rho,Sim->B,Sim->L,
-    Sim->end_tol, Sim->Q_e0,Sim->S,Sim->tau_esc,Sim->norm,Sim->avg_gamma,Sim->V,Sim->array_len,
-    Sim->max_gamma,Sim->min_gamma,Sim->init_power,Sim->samples_per_decade, Sim->change);
+    "%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%lld,%e,%e,%e,%lld,%e,%e,%e\n",
+    Sim->Electrons->delta_ln_gamma, Sim->R,Sim->inject_power, 
+    Sim->inject_power_2,Sim->inject_min,Sim->inject_break,Sim->inject_max,
+    Sim->B,Sim->L,Sim->end_tol,Sim->Q_e0,Sim->S,Sim->tau_esc,
+    Sim->norm,Sim->avg_gamma,Sim->V,Sim->array_len,Sim->max_gamma,
+    Sim->min_gamma,Sim->samples_per_decade, Sim->change, Sim->bulk_gamma, 
+    Sim->doppler_factor, Sim->z);
     fclose(file);
 }
 
@@ -507,22 +517,21 @@ int main()
     SimulationParams *Sim = malloc(sizeof(SimulationParams));
     // simulation setup
     // free params
-    Sim->init_power = 1.;
-    Sim->inject_min = 1e4;
-    Sim->inject_max = 1e8;
-    Sim->inject_power = 2.3;
-    Sim->B = 0.1;
-    Sim->R = 1e16;
-    Sim->L = 1e30;
-    Sim->rho = 1e-38;
-    Sim->bulk_gamma = 1.5;
-    Sim->dL = 3.086e18 * 644e6; // 644 million parsecs
+    Sim->inject_min = pow(10., 3.95);
+    Sim->inject_break = pow(10., 4.26);
+    Sim->inject_max = pow(10., 7.68);
+    Sim->inject_power = 1.22;
+    Sim->inject_power_2 = 3.37;
+    Sim->B = pow(10., -1.36);
+    Sim->R = pow(10., 16.12);
+    Sim->L = pow(10., 41.54);
+    Sim->doppler_factor = pow(10., 1.83);
     Sim->z = 0.15;
     // array params
     Sim->min_gamma = 1e1;
     Sim->max_gamma = 1e8;
-    Sim->min_freq = 1e6;
-    Sim->max_freq = 1e30;
+    Sim->min_freq = 1e-4;
+    Sim->max_freq = 1e27;
     Sim->samples_per_decade = 80;
     Sim->end_tol = 1e-8;
     Sim->max_iter = 1000;
@@ -548,17 +557,18 @@ int main()
     }
     Sim->B = hold;
     */
+
     char filename[100], filepath[100];
     sprintf(filename, "simulation_data.csv");
     sprintf(filepath, "csv_data/steady_state/%s", filename);
     FILE *file = fopen(filepath, "w");
     fclose(file);
-
+    printf("here\n");
     simulate(filepath, Sim);
 
     write_run_file(Sim, filename);
     
-   /*
+    /*
     hold = Sim->inject_min;
     double param[6] = {1e3,2.5e3,5e3,1e4,2.5e4,5e4};
     for (int i =0; i < 6; i++)
