@@ -147,7 +147,7 @@ double I(double gamma, double min, double max, double power, SimulationParams *S
     }
 }
 
-void normalize_power_law_dist(double power, SimulationParams *Sim)
+void normalize_inject_dist(double power, SimulationParams *Sim)
 {
         // normalise power law dist based on a given power
         Sim->norm =
@@ -163,7 +163,7 @@ void set_initial_state(SimulationParams *Sim)
         for (int64_t i = 1; i <= Sim->array_len; i++)
         {
             // re-normalize dist for init power
-            normalize_power_law_dist(Sim->init_power, Sim);
+            normalize_inject_dist(Sim->init_power, Sim);
             
             // set initial population on a selected power law
             // number of photons included based on background density
@@ -174,7 +174,7 @@ void set_initial_state(SimulationParams *Sim)
             //printf("%e %e\n", Sim->Species[lepton]->gamma[i], Sim->Species[lepton]->n[i]);
             
             // get ready for injection
-            normalize_power_law_dist(Sim->inject_power, Sim);
+            normalize_inject_dist(Sim->inject_power, Sim);
             //Sim->Species[lepton]->current_n[i] = 0.;
         }
     }
@@ -308,7 +308,7 @@ void simulate(FILE *file, SimulationParams *Sim)
 {
     // take input params and calculate coefficients
     calc_S(Sim);
-    normalize_power_law_dist(Sim->inject_power, Sim);
+    normalize_inject_dist(Sim->inject_power, Sim);
     calc_Q_e0(Sim);
     calc_tau_esc(Sim);
     

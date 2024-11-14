@@ -181,7 +181,7 @@ double I(double gamma, double min, double max, double power, SimulationParams *S
     }
 }
 
-void normalize_power_law_dist(double power, SimulationParams *Sim)
+void normalize_inject_dist(double power, SimulationParams *Sim)
 {
         // normalise power law dist based on a given power
         Sim->norm =
@@ -195,7 +195,7 @@ void set_initial_state(SimulationParams *Sim)
     for (int32_t lepton = 0; lepton < Sim->n_species; lepton++)
     {
         // re-normalize dist for init power
-        normalize_power_law_dist(Sim->init_power, Sim);
+        normalize_inject_dist(Sim->init_power, Sim);
         for (int64_t i = 1; i <= Sim->array_len; i++)
         {
             // set initial population on a selected power law
@@ -209,7 +209,7 @@ void set_initial_state(SimulationParams *Sim)
             // get ready for injection
             Sim->Species[lepton]->lnn[i] = log(Sim->Species[lepton]->lnn[i]);
         }
-        normalize_power_law_dist(Sim->inject_power, Sim);
+        normalize_inject_dist(Sim->inject_power, Sim);
     }
 }
 
@@ -358,7 +358,7 @@ void simulate(FILE *file, SimulationParams *Sim)
 {
     // take input params and calculate coefficients
     calc_S(Sim);
-    normalize_power_law_dist(Sim->inject_power, Sim);
+    normalize_inject_dist(Sim->inject_power, Sim);
     calc_Q_e0(Sim);
     calc_tau_esc(Sim);
     
