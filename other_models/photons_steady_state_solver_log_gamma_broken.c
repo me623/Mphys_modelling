@@ -19,13 +19,13 @@
 
 #define H0 2.27e-18 // Hubble constant in cgs
 
-typedef struct LeptonParams
+typedef struct ElectronParams
 {
     double *n;
     double *prev_n;
     double *gamma;
     double delta_ln_gamma;
-} LeptonParams;
+} ElectronParams;
 
 typedef struct PhotonParams
 {
@@ -69,7 +69,7 @@ typedef struct SimulationParams
 
 
     // code specific values
-    LeptonParams *Electrons;
+    ElectronParams *Electrons;
     PhotonParams *Photons;
     double *nu_flux;
     double *flux_freq;
@@ -80,7 +80,7 @@ typedef struct SimulationParams
 
 } SimulationParams;
 
-void malloc_and_fill_gamma_array(SimulationParams *Sim, LeptonParams *Lepton)
+void malloc_and_fill_gamma_array(SimulationParams *Sim, ElectronParams *Lepton)
 {
     int64_t decades;
     // calculate number of decades in the gamma range
@@ -129,7 +129,7 @@ void malloc_and_fill_frequency_array(SimulationParams *Sim, PhotonParams *Photon
 
 void malloc_Sim_arrays(SimulationParams *Sim)
 {
-    Sim->Electrons = malloc(sizeof(LeptonParams));
+    Sim->Electrons = malloc(sizeof(ElectronParams));
     malloc_and_fill_gamma_array(Sim, Sim->Electrons);
     Sim->Electrons->n = calloc((Sim->array_len + 2), sizeof(double));
     Sim->Electrons->prev_n = malloc((Sim->array_len + 2) * sizeof(double));
@@ -320,7 +320,7 @@ void calc_doppler_factor(SimulationParams *Sim)
     Sim->doppler_factor = sqrt((1 + beta) / (1 - beta));
 }
 
-void fda_step(SimulationParams *Sim, LeptonParams *Lepton)
+void stepping_regime(SimulationParams *Sim, ElectronParams *Lepton)
 {
     for (int64_t i =  Sim->array_len; i >= 1; i--)
     {
@@ -335,7 +335,7 @@ void fda_step(SimulationParams *Sim, LeptonParams *Lepton)
     }
 }
 
-void save_step_to_prev_n(SimulationParams *Sim, LeptonParams *Lepton)
+void save_step_to_prev_n(SimulationParams *Sim, ElectronParams *Lepton)
 {
     for (int64_t i = 0; i <= Sim->array_len + 1; i++)
     {
@@ -343,7 +343,7 @@ void save_step_to_prev_n(SimulationParams *Sim, LeptonParams *Lepton)
     }
 }
 
-void equilibrium_check(SimulationParams *Sim, LeptonParams *Lepton)
+void equilibrium_check(SimulationParams *Sim, ElectronParams *Lepton)
 {
     Sim->change = 0.;
     // calculate percentage change in n
@@ -363,7 +363,7 @@ void equilibrium_check(SimulationParams *Sim, LeptonParams *Lepton)
     }
 }
 
-void impose_BCs(SimulationParams *Sim, LeptonParams *Lepton)
+void impose_BCs(SimulationParams *Sim, ElectronParams *Lepton)
 {
     Lepton->n[Sim->array_len+1] = 0.;
 }
@@ -436,7 +436,7 @@ double eps(double freq)
     return (h * freq) / (m_e * c * c);
 }
 
-void photon_calc(LeptonParams *Electrons, PhotonParams *Photons, SimulationParams *Sim)
+void photon_calc(ElectronParams *Electrons, PhotonParams *Photons, SimulationParams *Sim)
 {
     double max_val = 0.;
     char header[100];
@@ -496,7 +496,7 @@ void simulate(char *filepath, SimulationParams *Sim)
     while (Sim->end_sim == false && Sim->iter < Sim->max_iter)
     {
         save_step_to_prev_n(Sim, Sim->Electrons);
-        fda_step(Sim, Sim->Electrons);
+        stepping_regime(Sim, Sim->Electrons);
         equilibrium_check(Sim, Sim->Electrons);
         impose_BCs(Sim, Sim->Electrons);
 

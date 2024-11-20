@@ -14,14 +14,14 @@
 #define c 3e10
 #define sigma_t 6.65e-25
 
-typedef struct LeptonParams
+typedef struct ElectronParams
 {
     double *current_lnn;
     double *next_lnn;
     double *gamma;
     double *ln_g;
     double dln_g;
-} LeptonParams;
+} ElectronParams;
 
 typedef struct SimulationParams
 {
@@ -54,7 +54,7 @@ typedef struct SimulationParams
     double lambertW;
 
     int32_t n_species;
-    LeptonParams **Species;
+    ElectronParams **Species;
 
     char *buffer;
     size_t *buffer_index;
@@ -91,7 +91,7 @@ double lambertW(double x)
     return w;
 }
 
-void malloc_and_fill_gamma_array(SimulationParams *Sim, LeptonParams *Lepton)
+void malloc_and_fill_gamma_array(SimulationParams *Sim, ElectronParams *Lepton)
 {
     int64_t decades;
 
@@ -117,14 +117,14 @@ void malloc_and_fill_gamma_array(SimulationParams *Sim, LeptonParams *Lepton)
 
 void malloc_Sim_arrays(SimulationParams *Sim)
 {
-    Sim->Species = malloc(Sim->n_species * sizeof(LeptonParams *));
+    Sim->Species = malloc(Sim->n_species * sizeof(ElectronParams *));
     Sim->buffer = malloc(BUFFER_SIZE * sizeof(char));
     Sim->buffer_index = malloc(sizeof(*(Sim->buffer_index)));
     *Sim->buffer_index = 0;
 
     for (int32_t i = 0; i < Sim->n_species; i++)
     {
-        Sim->Species[i] = malloc(sizeof(LeptonParams));
+        Sim->Species[i] = malloc(sizeof(ElectronParams));
         malloc_and_fill_gamma_array(Sim, Sim->Species[i]);
         Sim->Species[i]->next_lnn = calloc(Sim->array_len + 1, sizeof(double));
         Sim->Species[i]->current_lnn = calloc(Sim->array_len + 1, sizeof(double));
@@ -159,7 +159,7 @@ double I(double gamma, double min, double max, double power, SimulationParams *S
     }
 }
 
-void implicit_step(SimulationParams *Sim, LeptonParams *Lepton)
+void implicit_step(SimulationParams *Sim, ElectronParams *Lepton)
 {
     for (int64_t i = Sim->array_len - 1; i >= 0; i--)
     {

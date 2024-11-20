@@ -44,13 +44,13 @@ double lambertW(double x)
     return w;
 }
 
-typedef struct LeptonParams
+typedef struct ElectronParams
 {
     double *current_n;
     double *next_n;
     double *gamma;
     double delta_gamma;
-} LeptonParams;
+} ElectronParams;
 
 typedef struct SimulationParams
 {
@@ -85,7 +85,7 @@ typedef struct SimulationParams
 
     // code specific values
     int32_t n_species;
-    LeptonParams **Species;
+    ElectronParams **Species;
     double change;
     double lambertw;
     bool end_sim;
@@ -95,7 +95,7 @@ typedef struct SimulationParams
 
 } SimulationParams;
 
-void malloc_and_fill_gamma_array(SimulationParams *Sim, LeptonParams *Lepton)
+void malloc_and_fill_gamma_array(SimulationParams *Sim, ElectronParams *Lepton)
 {
     int64_t decades;
     // calculate number of decades in the gamma range
@@ -118,14 +118,14 @@ void malloc_and_fill_gamma_array(SimulationParams *Sim, LeptonParams *Lepton)
 
 void malloc_Sim_arrays(SimulationParams *Sim)
 {
-    Sim->Species = malloc(Sim->n_species * sizeof(LeptonParams *));
+    Sim->Species = malloc(Sim->n_species * sizeof(ElectronParams *));
     Sim->buffer = malloc(BUFFER_SIZE * sizeof(char));
     Sim->buffer_index = malloc(sizeof(*(Sim->buffer_index)));
     *Sim->buffer_index = 0;
 
     for (int32_t i = 0; i < Sim->n_species; i++)
     {
-        Sim->Species[i] = malloc(sizeof(LeptonParams));
+        Sim->Species[i] = malloc(sizeof(ElectronParams));
         malloc_and_fill_gamma_array(Sim, Sim->Species[i]);
         Sim->Species[i]->next_n = malloc((Sim->array_len + 1) * sizeof(double));
         Sim->Species[i]->current_n = malloc((Sim->array_len + 1) * sizeof(double));
@@ -270,7 +270,7 @@ void calc_tau_esc(SimulationParams *Sim)
     Sim->tau_esc = (3. / 4.) * (Sim->R / c);
 }
 
-void implicit_step(SimulationParams *Sim, LeptonParams *Lepton)
+void implicit_step(SimulationParams *Sim, ElectronParams *Lepton)
 {
     for (int64_t i = Sim->array_len-1; i >= 0; i--)
     {
@@ -328,7 +328,7 @@ void implicit_step(SimulationParams *Sim, LeptonParams *Lepton)
     }
 }
 
-void save_step_to_prev_n(SimulationParams *Sim, LeptonParams *Lepton)
+void save_step_to_prev_n(SimulationParams *Sim, ElectronParams *Lepton)
 {
     for (int64_t i = Sim->array_len - 1; i >= 0; i--)
     {
@@ -337,7 +337,7 @@ void save_step_to_prev_n(SimulationParams *Sim, LeptonParams *Lepton)
     }
 }
 
-bool equilibrium_check(SimulationParams *Sim, LeptonParams *Lepton)
+bool equilibrium_check(SimulationParams *Sim, ElectronParams *Lepton)
 {
     Sim->change = 0.;
     double dn;

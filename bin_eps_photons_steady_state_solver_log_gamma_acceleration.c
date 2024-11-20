@@ -22,13 +22,14 @@ typedef struct ElectronParams
     double *n;
     double *prev_n;
     double *gamma;
+    double *dgamma_forward;
     double delta_ln_gamma;
 } ElectronParams;
 
 typedef struct PhotonParams
 {
     double *n;
-    double *frequency;
+    double *eps;
     double *j_nu;
     double *x;
 } PhotonParams;
@@ -39,8 +40,8 @@ typedef struct SimulationParams
     int64_t array_len;
     double max_gamma;
     double min_gamma;
-    double max_freq;
-    double min_freq;
+    double max_eps;
+    double min_eps;
     int64_t samples_per_decade;
 
     // free parameters
@@ -54,8 +55,10 @@ typedef struct SimulationParams
     double end_tol; // tolerance for change in n to count as equilibrium
     double dL;      // luminosity distance
     double z;       // redshift
+    double tau_acc;
     double doppler_factor;
     double (*I)();  // injection term!
+    double LHS_BC;
 
     // broken power law parameters
     double inject_break;
@@ -68,21 +71,23 @@ typedef struct SimulationParams
     double norm;    // normalize the prob dist
     double avg_gamma;   // average gamma of injected dist for Q_e0 calc
     double V;           // volume of system (spherical based on R)   
+    double gamma_eq;
 
 
     // code specific values
     ElectronParams *Electrons;
     PhotonParams *Photons;
     double *nu_flux;
-    double *flux_freq;
+    double *flux_eps;
     double change;
     bool end_sim;
     int64_t iter;
     int64_t max_iter;
+    int64_t gamma_eq_break;
 
 } SimulationParams;
 
-void malloc_and_fill_gamma_array(SimulationParams *Sim, ElectronParams *Lepton)
+void malloc_and_fill_gamma_array(SimulationParams *Sim, ElectronParams *Electrons)
 {
     int64_t decades;
     // calculate number of decades in the gamma range
@@ -91,40 +96,46 @@ void malloc_and_fill_gamma_array(SimulationParams *Sim, ElectronParams *Lepton)
     Sim->array_len = decades * Sim->samples_per_decade;
 
     // malloc gamma and delta gamma array
-    Lepton->gamma = malloc((Sim->array_len + 2) * sizeof(double));
-  
+    Electrons->gamma = malloc((Sim->array_len + 2) * sizeof(double));
+    Electrons->dgamma_forward = malloc((Sim->array_len + 2) * sizeof(double));
+
     // fill gamma array with equal log step data
     for (int64_t i = 0; i <= Sim->array_len + 1; i++)
     {
-        Lepton->gamma[i] = pow(10, log10(Sim->min_gamma) + (i-1) / (double)Sim->samples_per_decade);
+        Electrons->gamma[i] = pow(10, log10(Sim->min_gamma) + (i-1) / (double)Sim->samples_per_decade);
+        
+        if (i > 0)
+        {
+            Electrons->dgamma_forward[i-1] = Electrons->gamma[i] - Electrons->gamma[i-1];
+        }
     }
 
-    Lepton->delta_ln_gamma = log(Lepton->gamma[1]) - log(Lepton->gamma[0]);
+    Electrons->delta_ln_gamma = log(Electrons->gamma[1]) - log(Electrons->gamma[0]);
 }
-void malloc_and_fill_frequency_array(SimulationParams *Sim, PhotonParams *Photons)
+void malloc_and_fill_eps_array(SimulationParams *Sim, PhotonParams *Photons)
 {
     int64_t decades, samples_per_decade;
     // calculate number of decades in the gamma range
-    decades = (int64_t)log10(Sim->max_freq) - log10(Sim->min_freq);
+    decades = (int64_t)log10(Sim->max_eps) - log10(Sim->min_eps);
     samples_per_decade = Sim->array_len / decades;
     
     // malloc gamma and delta gamma arrays
-    Photons->frequency = calloc(Sim->array_len + 2, sizeof(double));
-    Sim->nu_flux = calloc((Sim->array_len + 2), sizeof(double));
-    Sim->flux_freq = calloc((Sim->array_len + 2), sizeof(double));
+    Photons->eps = calloc(Sim->array_len + 2, sizeof(double));
+    Sim->nu_flux = calloc(Sim->array_len + 2, sizeof(double));
+    Sim->flux_eps = calloc(Sim->array_len + 2, sizeof(double));
     Photons->j_nu  = calloc(Sim->array_len + 2, sizeof(double));
-    Photons->x  = calloc(Sim->array_len + 2, sizeof(double));
 
     // fill gamma array with equal log step data
-    for (int64_t i = 1; i <= Sim->array_len + 1; i++)
+    for (int64_t i = 0; i <= Sim->array_len + 1; i++)
     {
-        Photons->frequency[i] = pow(10, log10(Sim->min_freq) + (i-1) / (double)samples_per_decade);
+        Photons->eps[i] = pow(10, log10(Sim->min_eps) + (i-1) / (double)samples_per_decade);
     }
 
     // Calculate the step size in logs
     double log_step = 1.0 / (double)Sim->samples_per_decade;
     // Extrapolate gamma[0] based on gamma[1]
-    Photons->frequency[0] = pow(10, log10(Sim->min_freq) - log_step);
+    Photons->eps[0] = pow(10, log10(Sim->min_eps) - log_step);
+    printf("min eps %e, max eps %e\n", Photons->eps[0], Photons->eps[Sim->array_len + 1]);
 }
 
 void malloc_Sim_arrays(SimulationParams *Sim)
@@ -135,7 +146,7 @@ void malloc_Sim_arrays(SimulationParams *Sim)
     Sim->Electrons->prev_n = malloc((Sim->array_len + 2) * sizeof(double));
 
     Sim->Photons = malloc(sizeof(PhotonParams));
-    malloc_and_fill_frequency_array(Sim, Sim->Photons);
+    malloc_and_fill_eps_array(Sim, Sim->Photons);
     Sim->Photons->n = calloc((Sim->array_len + 2), sizeof(double));
 
 }
@@ -147,9 +158,8 @@ void free_Sim_arrays(SimulationParams *Sim)
     free(Sim->Electrons->gamma);
     free(Sim->Electrons);
     free(Sim->Photons->n);
-    free(Sim->Photons->frequency);
+    free(Sim->Photons->eps);
     free(Sim->Photons->j_nu);
-    free(Sim->Photons->x);
     free(Sim->Photons);
     free(Sim->nu_flux);
 }
@@ -185,26 +195,23 @@ double broken_power_law(double gamma, SimulationParams *Sim)
       }
       else
       {
-        return Sim->Q_e0 * Sim->norm * pow(gamma/ Sim->inject_min, -Sim->inject_power);
+        return Sim->Q_e0 * Sim->norm * pow(gamma / Sim->inject_min, -Sim->inject_power);
       }
     }
 }
 
 void normalize_inject_dist(double power, SimulationParams *Sim)
 {
-        // normalise power law dist based on a given power
-        /*
-        Sim->norm =
-        1. / 
-        ((pow(Sim->max_gamma, 1. - power) / (1. - power)) 
-        - (pow(Sim->min_gamma, 1. - power) / (1. - power)));
-        */
+        // normalize power law dist based on a given power
        double integral = 0;
        Sim->Q_e0 = 1.;
        Sim->norm = 1.;
        for (int64_t i = 0; i <= Sim->array_len + 1; i++)
        {
-        integral += Sim->I(Sim->Electrons->gamma[i], Sim);
+        integral += 0.5 
+        * (Sim->I(Sim->Electrons->gamma[i + 1], Sim) 
+            + Sim->I(Sim->Electrons->gamma[i], Sim))
+        * (Sim->Electrons->dgamma_forward[i]);
        }
        Sim->norm /= integral;
        
@@ -302,61 +309,103 @@ void calc_S(SimulationParams *Sim)
 
 void calc_Q_e0(SimulationParams *Sim)
 {
-    // calculate a pre-solved integral of gamma * gamma^-p
-    Sim->avg_gamma =
-        Sim->norm * (pow(Sim->inject_max, 2. - Sim->inject_power) / (2. - Sim->inject_power)) 
-        - Sim->norm * (pow(Sim->inject_min, 2. - Sim->inject_power) / (2. - Sim->inject_power));
-    // correct for divide by zero errors when p = 2
-    if (Sim->inject_power == 2.)
-        Sim->avg_gamma = Sim->norm * log(Sim->inject_max) - Sim->norm * log(Sim->inject_min);
-    
+    // calculate a pre-solved    integral of gamma * gamma^-p
+    Sim->avg_gamma = 0.;
+    Sim->Q_e0 = 1.;
+    for (int64_t i = 0; i <= Sim->array_len + 1; i++)
+    {
+        Sim->avg_gamma += 0.5 
+        * (Sim->Electrons->gamma[i+1] * Sim->I(Sim->Electrons->gamma[i+1], Sim)
+            + Sim->Electrons->gamma[i] * Sim->I(Sim->Electrons->gamma[i], Sim)) 
+        * (Sim->Electrons->dgamma_forward[i]);
+    }
     // calculate volume
     Sim->V = (4./3.) * M_PI * Sim->R * Sim->R * Sim->R;
     // calculate injected Qe0
     Sim->Q_e0 = Sim->L / (Sim->V * Sim->avg_gamma * m_e * c * c);
 }
 
-void calc_tau_esc(SimulationParams *Sim)
+double calc_tau_esc(SimulationParams *Sim)
 {
     // calculate escape time for a spherical plasma based on the radius
     Sim->tau_esc = (3.* Sim->R) / (4. * c);
+    return Sim->tau_esc;
 }
 
-void stepping_regime(SimulationParams *Sim, ElectronParams *Lepton)
+int find_closest_index(double *array,int64_t array_len, double target) {
+    int64_t closest_index = 0;
+    double minDiff = fabs(array[0] - target);
+    printf("target %e\n", target);
+    for (int i = 1; i < array_len; i++) {
+        double diff = fabs(array[i] - target);
+        if (diff < minDiff) {
+            minDiff = diff;
+            closest_index = i;
+        }
+    }
+
+    return closest_index;
+}
+
+
+void stepping_regime(SimulationParams *Sim, ElectronParams *Electron)
 {
-    for (int64_t i =  Sim->array_len; i >= 1; i--)
+    for (int64_t i = 1; i <= Sim->gamma_eq_break; i++)
     {
         // explicit stepping regime
-        Lepton->n[i] = 
+        Electron->n[i] = 
         (Sim->tau_esc * 
-        (Sim->S * Lepton->gamma[i+1] * Lepton->gamma[i+1] * Lepton->n[i+1]
-        - Lepton->gamma[i] * Lepton->delta_ln_gamma 
-        * Sim->I(Lepton->gamma[i], Sim)))
-         /
-        (Lepton->gamma[i] * (Sim->S * Sim->tau_esc * Lepton->gamma[i] - Lepton->delta_ln_gamma));
+        (Sim->S * pow(Electron->gamma[i-1], 2) * Electron->n[i-1] * Sim->tau_acc
+        + Electron->delta_ln_gamma * Sim->I(Electron->gamma[i], Sim) * Electron->gamma[i] * Sim->tau_acc
+        + Electron->gamma[i-1] * Electron->n[i-1]))
+        /
+        (Electron->gamma[i] 
+        * (Sim->S *  Electron->gamma[i] * Sim->tau_esc * Sim->tau_acc 
+        + Electron->delta_ln_gamma * Sim->tau_acc 
+        + Sim->tau_esc));
+    }
+    for (int64_t i = Sim->gamma_eq_break+1; i <= Sim->array_len; i++)
+    {            
+        // explicit stepping regime
+        Electron->n[i] = 
+        (Sim->tau_esc * 
+        (Sim->S * pow(Electron->gamma[i+1], 2) * Electron->n[i+1] * Sim->tau_acc
+        - Electron->delta_ln_gamma * Sim->I(Electron->gamma[i], Sim) * Electron->gamma[i] * Sim->tau_acc
+        + Electron->gamma[i+1] * Electron->n[i+1]))
+        /
+            (Electron->gamma[i] 
+            * (Sim->S *  Electron->gamma[i] * Sim->tau_esc * Sim->tau_acc 
+            - Electron->delta_ln_gamma * Sim->tau_acc 
+            + Sim->tau_esc));
     }
 }
 
-void save_step_to_prev_n(SimulationParams *Sim, ElectronParams *Lepton)
+void save_step_to_prev_n(SimulationParams *Sim, ElectronParams *Electrons)
 {
     for (int64_t i = 0; i <= Sim->array_len + 1; i++)
     {
-        Lepton->prev_n[i] = Lepton->n[i];
+        Electrons->prev_n[i] = Electrons->n[i];
     }
 }
 
-void equilibrium_check(SimulationParams *Sim, ElectronParams *Lepton)
+void equilibrium_check(SimulationParams *Sim, ElectronParams *Electrons)
 {
     Sim->change = 0.;
     // calculate percentage change in n
-    for (int64_t i = 1; i <= Sim->array_len; i++)
+    for (int64_t i = 1; i < Sim->array_len - 1; i++)
     {
-        Sim->change += pow(
-            (1. / Lepton->n[i]) * ((Lepton->n[i] - Lepton->prev_n[i])),
-             2.);
+        if (Electrons->n[i] == 0.)
+        {
+            continue;
+        }
+        
+        Sim->change += 0.5 * 
+        (pow((1. / Electrons->n[i]) * ((Electrons->n[i] - Electrons->prev_n[i])), 2.)
+        + pow((1. / Electrons->n[i+1]) * ((Electrons->n[i+1] - Electrons->prev_n[i+1])), 2.))
+        * (Electrons->dgamma_forward[i]);
     }
     Sim->change = sqrt(Sim->change);
-    
+    printf("%e\n", Sim->change);
     // check change in population against specified end tolerance
     if (Sim->change < Sim->end_tol)
     {
@@ -365,10 +414,10 @@ void equilibrium_check(SimulationParams *Sim, ElectronParams *Lepton)
     }
 }
 
-void impose_BCs(SimulationParams *Sim, ElectronParams *Lepton)
+void impose_BCs(SimulationParams *Sim, ElectronParams *Electrons)
 {
-    Lepton->n[0] = Lepton->n[1];
-    Lepton->n[Sim->array_len+1] = 0.;
+    Electrons->n[0] = Sim->LHS_BC;
+    Electrons->n[Sim->array_len+1] = 0.;
 }
 
 // Function to compute the Whittaker function W
@@ -388,12 +437,12 @@ double W(double kappa, double mu, double z) {
 double CS(double x)
 {
     return W(0., 4./3., x) * W(0., 1./3., x) - W(1./2., 5./6., x) * W(-1./2., 5./6., x);
-}
+}   
 
 // critical frequency
 double nu_crit(double gamma, SimulationParams *Sim)
 {
-    return gamma * gamma * Sim->B * 3. * q / (4. * M_PI * m_e * c);
+    return (gamma * gamma * Sim->B * 3. * q) / (4. * M_PI * m_e * c);
 }
 
 // energy emitted by a particle with energy gamma at frequency mu
@@ -407,33 +456,36 @@ double P_nu(double gamma, double freq, SimulationParams *Sim)
 double j_nu(double freq, SimulationParams *Sim)
 {
     double integral = 0.0;
-    double dgamma = (Sim->Electrons->gamma[Sim->array_len] - Sim->Electrons->gamma[0]) / (Sim->array_len - 1);
 
-    for (int64_t i = 0; i < Sim->array_len - 1; i++)
+    for (int64_t i = 1; i < Sim->array_len - 1; i++)
     {
         double gamma_i = Sim->Electrons->gamma[i];
         double gamma_ip1 = Sim->Electrons->gamma[i + 1];
         double n_i = Sim->Electrons->n[i];
         double n_ip1 = Sim->Electrons->n[i + 1];
-
-        integral += 0.5 * (n_i * P_nu(gamma_i, freq, Sim) + n_ip1 * P_nu(gamma_ip1, freq, Sim)) * dgamma;
+        // use trapezium rule
+        integral += 0.5 * (n_i * P_nu(gamma_i, freq, Sim) + n_ip1 * P_nu(gamma_ip1, freq, Sim)) * (gamma_ip1 - gamma_i);
     }
 
     return integral / (4.0 * M_PI);
 }
 
 double alpha_nu(double freq, SimulationParams *Sim) {
-    double integral = 0.0;
-
+    double integrand, integrand_next, integral = 0.0;
+    double *gamma = Sim->Electrons->gamma;
+    double *dgamma = Sim->Electrons->dgamma_forward;
+    double *n = Sim->Electrons->n;
     for (int64_t i = 1; i <= Sim->array_len; i++) {
-        double gamma = Sim->Electrons->gamma[i];
-        double gamma_next = Sim->Electrons->gamma[i + 1];
-        double n = Sim->Electrons->n[i];
-        double n_next = Sim->Electrons->n[i + 1];
-        double P = P_nu(gamma, freq, Sim);
-
-        integral += pow(gamma, 2.) * P 
-          * ((n_next / pow(gamma_next, 2.)) - (n / pow(gamma, 2.))) / (gamma_next - gamma);
+        integrand = 
+        pow(gamma[i], 2) 
+        * P_nu(gamma[i], freq, Sim) 
+        * ((n[i+1] / pow(gamma[i+1], 2)) - (n[i] / pow(gamma[i], 2))) / dgamma[i];
+        integrand_next = 
+        pow(gamma[i+1], 2) 
+        * P_nu(gamma[i+1], freq, Sim) 
+        * ((n[i+2] / pow(gamma[i+2], 2)) - (n[i+1] / pow(gamma[i+1], 2))) / dgamma[i+1];
+        
+        integral += 0.5 * (integrand + integrand_next) * dgamma[i];
     }
     
     integral /= (-8.0 * M_PI * m_e * pow(freq, 2));
@@ -441,24 +493,26 @@ double alpha_nu(double freq, SimulationParams *Sim) {
     return integral;
 }
 
+double freq_from_eps(double eps)
+{
+    return m_e * c * c * eps / h;
+}
+
+double eps_from_freq(double freq)
+{
+    // Calculate intrinsic epsilon
+    return (h * freq) / (m_e * c * c);
+}
 
 void photon_calc(SimulationParams *Sim)
 {
     for (int64_t i = 1; i <= Sim->array_len; i++)
     {
-        Sim->Photons->j_nu[i] = j_nu(Sim->Photons->frequency[i], Sim);
-        Sim->Photons->n[i] =(4 * M_PI * Sim->tau_esc * Sim->Photons->j_nu[i]) / (h * Sim->Photons->frequency[i]);
-        //Sim->Photons->n[i] -= Sim->Photons->n[i] / Sim->tau_esc;
-        //Sim->Photons->n[i] += c * alpha_nu(Sim->Photons->frequency[i], Sim) * Sim->Photons->n[i];
+        Sim->Photons->j_nu[i] = j_nu(freq_from_eps(Sim->Photons->eps[i]), Sim);
+        Sim->Photons->n[i] = (2 * Sim->Photons->j_nu[i]) / (h_bar * Sim->Photons->eps[i]);
+        Sim->Photons->n[i] -= Sim->Photons->n[i] / Sim->tau_esc;
+        Sim->Photons->n[i] += c * alpha_nu(freq_from_eps(Sim->Photons->eps[i]), Sim) * Sim->Photons->n[i];
     }
-
-}
-
-double eps(double freq, double z, double doppler_factor)
-{
-    // Calculate intrinsic epsilon
-    return (h * freq) / (m_e * c * c);
-    // Apply Doppler and redshift correction to get plasma frame epsilon
 
 }
 
@@ -466,27 +520,31 @@ void calc_flux(SimulationParams *Sim)
 {
     // Calculate the luminosity distance from z<<1 approx
     Sim->dL = c * Sim->z / H0;
-    printf("dL: %e Mpc\n", Sim->dL / 3.086e24);
+    //printf("dL: %e Mpc\n", Sim->dL / 3.086e24);
+    Sim->dL = 1749 * 3.086e24;
 
     // Iterate over the array of intrinsic frequencies
     for (int64_t i = 1; i <= Sim->array_len; i++)
     {
-        // splines
         // Calculate observed frequency for each intrinsic frequency
-        double nu = Sim->Photons->frequency[i];
-        double nu_obs = Sim->doppler_factor *  Sim->Photons->frequency[i]/(1+Sim->z);
-        // Calculate epsilon in the plasma frame
-        double eps_plasma = eps(nu, Sim->z, Sim->doppler_factor);
+        double eps_obs = Sim->doppler_factor * Sim->Photons->eps[i] / (1. + Sim->z);
+        double nu_obs = freq_from_eps(eps_obs);
+        double pre_fac;
+        pre_fac = m_e * pow(c, 2.) * pow(Sim->doppler_factor, 4.) * Sim->V;
+        pre_fac /= 4. * M_PI * (1. + Sim->z) * pow(Sim->dL, 2.) * Sim->tau_esc;
         // Calculate the flux in the observer frame
         Sim->nu_flux[i] = 
-            (pow(eps_plasma, 2.) * m_e * c * c 
-            * (m_e * c * c / h) * Sim->Photons->n[i] 
-            * pow(Sim->doppler_factor, 4.) 
-            * Sim->V)
-            /
-            (4. * M_PI * pow(Sim->dL, 2.) * (1. + Sim->z) * Sim->tau_esc);
+            pre_fac * (pow(Sim->Photons->eps[i], 2.) * Sim->Photons->n[i]);
         
-        Sim->flux_freq[i] = nu_obs;
+        Sim->flux_eps[i] = eps_obs;
+    }
+}
+
+void clear_n_e_array(SimulationParams *Sim)
+{
+    for (int64_t i =0; i <= Sim->array_len+1; i++)
+    {
+        Sim->Electrons->n[i] = 0.;
     }
 }
 
@@ -495,22 +553,26 @@ void simulate(char *filepath, SimulationParams *Sim)
     char header[100];
     // write gammas to csv
     write_column_to_csv(filepath, Sim->Electrons->gamma, Sim->array_len+2, "gamma");
+    clear_n_e_array(Sim);
     // take input params and calculate coefficients
     calc_S(Sim);
     normalize_inject_dist(Sim->inject_power, Sim);
     calc_Q_e0(Sim);
     calc_tau_esc(Sim);
-
+    // set BCs
     impose_BCs(Sim, Sim->Electrons);
+    // find the break point for the upwind and downwind solving
+    Sim->gamma_eq = -1. / (Sim->tau_acc * Sim->S);
+    Sim->gamma_eq_break = find_closest_index(Sim->Electrons->gamma, Sim->array_len, Sim->gamma_eq);
 
     // start simulation
-    printf("Start Sim with C %e, tau %e B %.2lf, S %e g_array %lld\n", 
-    Sim->Q_e0 * Sim->norm, Sim->tau_esc, Sim->B, Sim->S, Sim->array_len);
+    printf("Start Sim with C %.3e, tau %.3e B %.3lf, S %.3e g_array %lld, t_acc %.3e, gamma_eq_i %lld\n", 
+    Sim->Q_e0 * Sim->norm, Sim->tau_esc, Sim->B, Sim->S, Sim->array_len, Sim->tau_acc, Sim->gamma_eq_break);
     
     Sim->end_sim = false;
     Sim->iter = 0;
     // write first csv column
-    sprintf(header, "iter %lld", Sim->iter);
+    sprintf(header, "ne_iter_%lld", Sim->iter);
     write_column_to_csv(filepath, Sim->Electrons->n, Sim->array_len+2, header);
     while (Sim->end_sim == false && Sim->iter < Sim->max_iter)
     {
@@ -518,7 +580,8 @@ void simulate(char *filepath, SimulationParams *Sim)
         stepping_regime(Sim, Sim->Electrons);
         equilibrium_check(Sim, Sim->Electrons);
         impose_BCs(Sim, Sim->Electrons);
-
+        //sprintf(header, "ne_iter_%e", Sim->iter);
+        //write_column_to_csv(filepath, Sim->Electrons->n, Sim->array_len+2, header);
         if (Sim->end_sim)
         {
             break;
@@ -526,21 +589,19 @@ void simulate(char *filepath, SimulationParams *Sim)
         
         Sim->iter ++;
     }
-    sprintf(header, "iter final", Sim->iter);
+    sprintf(header, "electron_n");
     write_column_to_csv(filepath, Sim->Electrons->n, Sim->array_len+2, header);
     // generate photon population
     photon_calc(Sim);
-    sprintf(header, "photon_freq");
-    write_column_to_csv(filepath, Sim->Photons->frequency, Sim->array_len+2, header);
+    sprintf(header, "photon_eps");
+    write_column_to_csv(filepath, Sim->Photons->eps, Sim->array_len+2, header);
     sprintf(header, "photon_n");
     write_column_to_csv(filepath, Sim->Photons->n, Sim->array_len+2, header);
     sprintf(header, "j_nu");
     write_column_to_csv(filepath, Sim->Photons->j_nu, Sim->array_len+2, header);
-    sprintf(header, "x");
-    write_column_to_csv(filepath, Sim->Photons->x, Sim->array_len+2, header);
     calc_flux(Sim);
-    sprintf(header, "flux_freq");
-    write_column_to_csv(filepath, Sim->flux_freq, Sim->array_len+2, header);
+    sprintf(header, "flux_eps");
+    write_column_to_csv(filepath, Sim->flux_eps, Sim->array_len+2, header);
     sprintf(header, "nu_flux");
     write_column_to_csv(filepath, Sim->nu_flux, Sim->array_len+2, header);
 }
@@ -552,12 +613,13 @@ void write_run_file(SimulationParams *Sim, char *filename)
 
     FILE *file = fopen(filepath, "w");
     fprintf(file, 
-    "delta_ln_gamma,R,inject_p,inject_min,inject_max,rho,B,L,end_tol,Q_e0,S,tau_esc,norm,avg_gamma,V,array_len,max_gamma,min_gamma,init_p,samples_per_decade,change,crit_freq\n");
+    "delta_ln_gamma,R,inject_p,inject_min,inject_max,B,L,end_tol,Q_e0,S,tau_esc,norm,avg_gamma,V,array_len,max_gamma,min_gamma,init_p,samples_per_decade,change,crit_freq,tau_acc,iter,gamma_eq,gamma_eq_break\n");
     fprintf(file,
-    "%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%lld,%e,%e,%e,%lld,%e,%e\n",
+    "%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%lld,%e,%e,%e,%lld,%e,%e,%e,%lld,%e,%lld\n",
     Sim->Electrons->delta_ln_gamma, Sim->R,Sim->inject_power,Sim->inject_min,Sim->inject_max,Sim->B,Sim->L,
     Sim->end_tol, Sim->Q_e0,Sim->S,Sim->tau_esc,Sim->norm,Sim->avg_gamma,Sim->V,Sim->array_len,
-    Sim->max_gamma,Sim->min_gamma,Sim->init_power,Sim->samples_per_decade, Sim->change,nu_crit(Sim->inject_min, Sim));
+    Sim->max_gamma,Sim->min_gamma,Sim->init_power,Sim->samples_per_decade, Sim->change,nu_crit(Sim->inject_min, Sim),
+    Sim->tau_acc, Sim->iter, Sim->gamma_eq, Sim->gamma_eq_break);
     fclose(file);
 }
 
@@ -567,6 +629,21 @@ int main()
     SimulationParams *Sim = malloc(sizeof(SimulationParams));
     // simulation setup
     // free params
+    /*
+    // j_nu confirmation
+    Sim->inject_min = 1e1;
+    Sim->inject_max = 1e4;
+    Sim->inject_power = 2.5;
+    Sim->B = 1;
+    Sim->R = 1e16;
+    Sim->L = 1e30;
+    Sim->doppler_factor = pow(10, 1.83);
+    Sim->z = 0.33;
+    Sim->tau_acc = 1e99;
+    Sim->I = &power_law;
+    */
+    /*
+    // KATU comparison Injection values
     Sim->inject_min = pow(10, 3.95);
     Sim->inject_break = pow(10, 4.26);
     Sim->inject_max = pow(10, 7.68);
@@ -576,32 +653,53 @@ int main()
     Sim->R = pow(10, 16.12);
     Sim->L = pow(10, 41.54);
     Sim->doppler_factor = pow(10, 1.83);
+    Sim->tau_acc = 1e99;
     Sim->z = 0.33;
     Sim->I = &broken_power_law;
+    */
     /*
-    Sim->inject_min = 1e4;
-    Sim->inject_max = 1e8;
+    // KATU comparison Steady State values
+    Sim->inject_min = pow(10, 1.33);
+    Sim->inject_break = pow(10, 4.03);
+    Sim->inject_max = pow(10, 6.82);
+    Sim->inject_power = 1.69;
+    Sim->inject_power_2 = 4.29;
+    Sim->B = pow(10, -1.01);
+    Sim->R = pow(10, 16.46);
+    Sim->L = pow(10, 41.54);
+    Sim->doppler_factor = pow(10, 1.44);
+    Sim->tau_acc = 1e256;
+    Sim->z = 0.33;
+    Sim->I = &broken_power_law;
+    */
+    
+    //Acceleration test
+    Sim->inject_min = 1e1;
+    Sim->inject_max = 1e2;
     Sim->inject_power = 2.3;
-    Sim->B = 0.1;
+    Sim->B = 0.0001;
     Sim->R = 1e16;
     Sim->L = 1e30;
     Sim->doppler_factor = pow(10, 1.83);
     Sim->z = 0.33;
+    Sim->tau_acc = calc_tau_esc(Sim) * 4.;
     Sim->I = &power_law;
-    */
+    Sim->LHS_BC = 4e-10;
+    
     // array params
     Sim->min_gamma = 1e1;
     Sim->max_gamma = 1e8;
-    Sim->min_freq = 1e-4;
-    Sim->max_freq = 1e30;
-    Sim->samples_per_decade = 128;
+    Sim->min_eps = 1e-12;
+    Sim->max_eps = 1e8;
+    Sim->samples_per_decade = 40;
     Sim->end_tol = 1e-8;
-    Sim->max_iter = 5;
-
+    Sim->max_iter = 2;
+ 
     malloc_Sim_arrays(Sim);
 
-    // generate the cooling test data
+    
     /*
+    // generate the cooling test data
     hold = Sim->B;
     double B[6] = {0.1,0.25,0.5,1.,1.5,2.};
     for (int i =0; i < 6; i++)
@@ -619,6 +717,28 @@ int main()
     }
     Sim->B = hold;
     */
+
+    
+    // generate the acceleration test data
+    hold = Sim->tau_acc;
+    double t_acc_multi[5] = {0.5,1.0,1.5,2.0,4.0};
+    for (int i =0; i < 5; i++)
+    {
+        Sim->tau_acc = t_acc_multi[i] * Sim->tau_esc;
+        // generate file name based on B
+        char filename[100], filepath[100];
+        sprintf(filename, "t_acc=%1.1lf_t_esc.csv", t_acc_multi[i]);
+        printf("generating %s\n",filename);
+        sprintf(filepath, "csv_data/steady_state/%s", filename);
+        FILE *file = fopen(filepath, "w");
+        fclose(file);
+        simulate(filepath, Sim);
+
+        write_run_file(Sim, filename);
+    }
+    Sim->tau_acc = hold;
+    
+
     char filename[100], filepath[100];
     sprintf(filename, "simulation_data.csv");
     sprintf(filepath, "csv_data/steady_state/%s", filename);
