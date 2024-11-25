@@ -174,7 +174,7 @@ void free_Sim_arrays(SimulationParams *Sim)
     free(Sim->Photons->eps);
     free(Sim->Photons->delta_freq);
     free(Sim->Photons->j_nu);
-    free(Sim->Photons);
+    free(Sim->Photons); 
     free(Sim->nu_flux);
     free(Sim->flux_eps);
 }
@@ -635,6 +635,7 @@ void simulate(char *filepath, SimulationParams *Sim)
     write_column_to_csv(filepath, Sim->Electrons->current_n, Sim->array_len+2, header);
 
     // generate photon population
+    /*
     photon_calc(Sim);
     sprintf(header, "j_nu");
     write_column_to_csv(filepath, Sim->Photons->j_nu, Sim->array_len+2, header);
@@ -648,7 +649,7 @@ void simulate(char *filepath, SimulationParams *Sim)
     write_column_to_csv(filepath, Sim->flux_eps, Sim->array_len+2, header);
     sprintf(header, "nu_flux");
     write_column_to_csv(filepath, Sim->nu_flux, Sim->array_len+2, header);
-
+    */
     gettimeofday(&end2, NULL);
     Sim->whole_time = (end2.tv_sec - start2.tv_sec) + (end2.tv_usec - start2.tv_usec) / 1000000.0;
     printf("whole time: %e\n", Sim->whole_time);
@@ -689,7 +690,7 @@ int main()
     double hold;
     SimulationParams *Sim = malloc(sizeof(SimulationParams));
     // simulation setup  
-    
+    /*  
     // acceleration test params
     Sim->inject_min = 1e1;
     Sim->inject_max = 1e2;
@@ -699,8 +700,8 @@ int main()
     Sim->L = 1e30;
     Sim->tau_acc = calc_tau_esc(Sim) * 4.;
     Sim->I = &power_law;
-    Sim->LHS_BC = 5e-10;    
-    
+    Sim->LHS_BC = 5e-10;
+    */
 
     /*
     // cooling test params
@@ -716,7 +717,36 @@ int main()
     Sim->I=&power_law;
     */
 
+    // KATU comparison Steady State values
+    Sim->inject_min = pow(10, 1.33);
+    Sim->inject_break = pow(10, 4.03);
+    Sim->inject_max = pow(10, 6.82);
+    Sim->inject_power = 1.69;
+    Sim->inject_power_2 = 4.29;
+    Sim->B = pow(10, -1.01);
+    Sim->R = pow(10, 16.46);
+    Sim->L = pow(10, 49.5);
+    Sim->doppler_factor = pow(10, 1.44);
+    Sim->tau_acc = 1e256;
+    Sim->z = 0.33;
+    Sim->I = &broken_power_law;
+    Sim->LHS_BC = 0.;
+
+    Sim->inject_min = 1e4;
+    //Sim->inject_break = 1e99;
+    Sim->inject_max = 1e8;
+    Sim->inject_power = 2.3;
+    //Sim->inject_power_2 = 4.29;
+    Sim->B = 1.;
+    Sim->R = 1e16;
+    Sim->L = 1e30;
+    Sim->doppler_factor = pow(10, 1.44);
+    Sim->tau_acc = 1e256;
+    Sim->z = 0.33;
+    Sim->I = &power_law;
+    Sim->LHS_BC = 0.;
     /*
+    // KATU comparison Injection values
     Sim->inject_min = pow(10, 3.95);
     Sim->inject_break = pow(10, 4.26);
     Sim->inject_max = pow(10, 7.68);
@@ -731,7 +761,6 @@ int main()
     Sim->I = &broken_power_law;
     Sim->LHS_BC = 0.;
     */
-
     Sim->min_gamma = 1e1;
     Sim->max_gamma = 1e8;
     Sim->min_freq = 1e6;
@@ -741,7 +770,6 @@ int main()
     Sim->dt = 1e100; //calc_tau_esc(Sim);
     Sim->end_t = 1e10;
     Sim->end_tol = 1e-8;
-
     // generate the cooling test data
     /*
     hold = Sim->B;
@@ -769,7 +797,6 @@ int main()
     }
     Sim->B = hold;
     */
-    
     /*
     // generate the acceleration test data
     hold = Sim->tau_acc;
@@ -790,16 +817,15 @@ int main()
     }
     Sim->tau_acc = hold;
     */
-   
-    /*
+    
     // test time taken vs samples per decade
     hold = Sim->samples_per_decade;
-    for (int i =1; i < 34; i++)
+    for (int i =8; i < 25; i++)
     {
-        Sim->samples_per_decade = 16 * i;
+        Sim->samples_per_decade = (int) pow(2., (float) i / 2.);
         // generate file name based on B
         char filename[100], filepath[100];
-        sprintf(filename, "samples_per_dec_%lld.csv", 16 * i);
+        sprintf(filename, "samples_per_dec_%lld.csv", Sim->samples_per_decade);
         printf("generating %s\n",filename);
         sprintf(filepath, "csv_data/implicit_solve/%s", filename);
         FILE *file = fopen(filepath, "w");
@@ -809,8 +835,7 @@ int main()
         write_run_file(filename, Sim);
     }
     Sim->samples_per_decade = hold;
-    */
-
+    
     char filename[100], filepath[100];
     sprintf(filename, "simulation_data.csv");
     sprintf(filepath, "csv_data/implicit_solve/%s", filename);
