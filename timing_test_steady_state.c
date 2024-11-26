@@ -73,6 +73,8 @@ typedef struct SimulationParams
     double avg_gamma;   // average gamma of injected dist for Q_e0 calc
     double V;           // volume of system (spherical based on R)   
     double gamma_eq;
+    double gamma_crit;
+    double theory_error;
 
     // code specific values
     ElectronParams *Electrons;
@@ -404,17 +406,18 @@ void equilibrium_check(SimulationParams *Sim, ElectronParams *Electrons)
     // calculate percentage change in n
     for (int64_t i = 1; i < Sim->array_len - 1; i++)
     {
-        if (Electrons->n[i] == 0. || Electrons->n[i+1] == 0.)
+        if (Electrons->n[i] < 1e-300 || Electrons->n[i+1] < 1e-300)
         {
             continue;
         }
-        
+        printf("%e, %e\n",Electrons->n[i], (1. / Electrons->n[i]));
         Sim->change += 0.5 * 
         (pow((1. / Electrons->n[i]) * ((Electrons->n[i] - Electrons->prev_n[i])), 2.)
         + pow((1. / Electrons->n[i+1]) * ((Electrons->n[i+1] - Electrons->prev_n[i+1])), 2.))
         * (Electrons->dgamma_forward[i]);
     }
     Sim->change = sqrt(Sim->change);
+    printf("%e\n", Sim->change);
     // check change in population against specified end tolerance
     if (Sim->change < Sim->end_tol)
     {
@@ -630,6 +633,41 @@ void simulate(char *filepath, SimulationParams *Sim)
     printf("whole time: %e\n", Sim->whole_time);
 }
 
+void check_theory_cooling(SimulationParams *Sim)
+{
+    int64_t crit_index;
+    double C = Sim->norm * Sim->Q_e0;
+    double hold = Sim->change;
+    double error;
+    // calculate the turn over gamma according to the theory
+    Sim->gamma_crit = 1. / ((1. - Sim->inject_power) * Sim->S * Sim->tau_esc);
+    // find the nearest gamma point to the critical value
+    //crit_index = find_closest_index(Sim->Electrons->gamma, Sim->array_len+2, Sim->gamma_crit);
+
+    // calculate theoretical cooling values 
+    for (int64_t i = 0; i <= Sim->array_len; i++)
+    {
+        if (Sim->Electrons->gamma[i] < Sim->inject_min)
+        {
+            continue;
+        }
+        if (Sim->Electrons->gamma[i] < Sim->gamma_crit)
+        {
+            Sim->Electrons->prev_n[i] = C * Sim->tau_esc * pow(Sim->Electrons->gamma[i], -1. * Sim->inject_power);
+        }
+        else
+        {
+            Sim->Electrons->prev_n[i] = (C / (Sim->S * (1 - Sim->inject_power)) * pow(Sim->Electrons->gamma[i], -1. * Sim->inject_power - 1.));
+        }
+    }
+
+    equilibrium_check(Sim, Sim->Electrons);
+    
+    Sim->theory_error = Sim->change;
+    Sim->change = hold;
+    
+}
+
 void write_run_file(SimulationParams *Sim, char *filename)
 {
     char filepath[100];
@@ -683,7 +721,7 @@ int main()
     Sim->I = &broken_power_law;
     Sim->LHS_BC = 0.;
     */
-    
+    /*
     // KATU comparison Steady State values
     Sim->inject_min = pow(10, 1.33);
     Sim->inject_break = pow(10, 4.03);
@@ -698,14 +736,14 @@ int main()
     Sim->z = 0.33;
     Sim->I = &broken_power_law;
     Sim->LHS_BC = 0.;
+    */
     
-    /*
     Sim->inject_min = 1e4;
     //Sim->inject_break = 1e99;
     Sim->inject_max = 1e8;
     Sim->inject_power = 2.3;
     //Sim->inject_power_2 = 4.29;
-    Sim->B = 1.;
+    Sim->B = 0.1;
     Sim->R = 1e16;
     Sim->L = 1e30;
     Sim->doppler_factor = pow(10, 1.44);
@@ -713,7 +751,7 @@ int main()
     Sim->z = 0.33;
     Sim->I = &power_law;
     Sim->LHS_BC = 0.;
-    */
+    
     /*
     //Acceleration test
     Sim->inject_min = 1e1;
@@ -735,7 +773,7 @@ int main()
     Sim->max_eps = 1e8;
     Sim->samples_per_decade = 80;
     Sim->end_tol = 1e-8;
-    Sim->max_iter = 1;
+    Sim->max_iter = 2;
     
     /*
     // generate the cooling test data
@@ -777,15 +815,17 @@ int main()
     }
     Sim->tau_acc = hold;
     */
-
+    /*
     // test time taken vs samples per decade
     hold = Sim->samples_per_decade;
+    for (int iter=1; iter <= 25; iter++)
+    {
     for (int i =8; i < 25; i++)
     {
         Sim->samples_per_decade = (int) pow(2., (float) i / 2.);
         // generate file name based on B
         char filename[100], filepath[100];
-        sprintf(filename, "samples_per_dec_%lld.csv", Sim->samples_per_decade);
+        sprintf(filename, "%lld_samples_per_dec_%lld.csv", iter, Sim->samples_per_decade);
         printf("generating %s\n",filename);
         sprintf(filepath, "csv_data/steady_state/%s", filename);
         FILE *file = fopen(filepath, "w");
@@ -794,8 +834,9 @@ int main()
 
         write_run_file(Sim, filename);
     }
+    }
     Sim->samples_per_decade = hold;
-
+    */
 
     char filename[100], filepath[100];
     sprintf(filename, "simulation_data.csv");

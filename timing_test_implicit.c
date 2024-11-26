@@ -413,7 +413,7 @@ bool equilibrium_check(SimulationParams *Sim, ElectronParams *Electrons)
     // calculate percentage change in n
     for (int64_t i = Sim->array_len; i >= 1; i--)
     {
-        if (Electrons->next_n[i] == 0. || Electrons->next_n[i+1] == 0.)
+        if (Electrons->next_n[i] < 1e-300 || Electrons->next_n[i+1] < 1e-300)
         {
             continue;
         }
@@ -655,6 +655,7 @@ void simulate(char *filepath, SimulationParams *Sim)
     printf("whole time: %e\n", Sim->whole_time);
 }
 
+
 void write_gammas_to_file(FILE *file, SimulationParams *Sim)
 {
     // print headers in csv file
@@ -716,7 +717,7 @@ int main()
     Sim->tau_acc = 1e99;
     Sim->I=&power_law;
     */
-
+    /*
     // KATU comparison Steady State values
     Sim->inject_min = pow(10, 1.33);
     Sim->inject_break = pow(10, 4.03);
@@ -731,7 +732,7 @@ int main()
     Sim->z = 0.33;
     Sim->I = &broken_power_law;
     Sim->LHS_BC = 0.;
-
+    */
     Sim->inject_min = 1e4;
     //Sim->inject_break = 1e99;
     Sim->inject_max = 1e8;
@@ -820,12 +821,14 @@ int main()
     
     // test time taken vs samples per decade
     hold = Sim->samples_per_decade;
+    for (int iter=1; iter <= 100; iter++)
+    {
     for (int i =8; i < 25; i++)
     {
         Sim->samples_per_decade = (int) pow(2., (float) i / 2.);
         // generate file name based on B
         char filename[100], filepath[100];
-        sprintf(filename, "samples_per_dec_%lld.csv", Sim->samples_per_decade);
+        sprintf(filename, "%lld_samples_per_dec_%lld.csv", iter, Sim->samples_per_decade);
         printf("generating %s\n",filename);
         sprintf(filepath, "csv_data/implicit_solve/%s", filename);
         FILE *file = fopen(filepath, "w");
@@ -833,6 +836,7 @@ int main()
         simulate(filepath, Sim);
 
         write_run_file(filename, Sim);
+    }
     }
     Sim->samples_per_decade = hold;
     
