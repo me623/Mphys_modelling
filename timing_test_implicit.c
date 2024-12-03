@@ -9,6 +9,7 @@
 #include <gsl/gsl_sf_hyperg.h>
 
 #define BUFFER_SIZE 33554432
+#define THEORY_LEN 917504
 // CGS unit constants
 #define m_e 9.109e-28
 #define c 2.998e10
@@ -24,6 +25,7 @@ typedef struct ElectronParams
     double *next_n;
     double *gamma;
     double *dgamma_forward;
+    double *theory_n;
     double delta_ln_gamma;
 } ElectronParams;
 
@@ -75,6 +77,7 @@ typedef struct SimulationParams
     double LHS_BC;
     double dL;
     double final_time;
+    double gamma_crit;
 
     // code specific values
     ElectronParams *Electrons;
@@ -108,10 +111,10 @@ void malloc_and_fill_gamma_array(SimulationParams *Sim, ElectronParams *Electron
     for (int64_t i = 1; i <= Sim->array_len + 1; i++)
     {
         Electrons->gamma[i] = pow(10, log10(Sim->min_gamma) + (i-1) / (double)Sim->samples_per_decade);
-        if (i > 0)
-        {
-            Electrons->dgamma_forward[i-1] = Electrons->gamma[i] - Electrons->gamma[i-1];
-        }
+    }
+    for (int64_t i = 0; i <= Sim->array_len + 1; i++)
+    {
+        Electrons->dgamma_forward[i] = Electrons->gamma[i+1] - Electrons->gamma[i];
     }
     // Calculate the step size in logs
     double log_step = 1.0 / (double)Sim->samples_per_decade;
@@ -154,6 +157,7 @@ void malloc_Sim_arrays(SimulationParams *Sim)
     malloc_and_fill_gamma_array(Sim, Sim->Electrons);
     Sim->Electrons->current_n = malloc((Sim->array_len + 2) * sizeof(double));
     Sim->Electrons->next_n = malloc((Sim->array_len + 2) * sizeof(double));
+    Sim->Electrons->theory_n = malloc((Sim->array_len + 2) * sizeof(double));
 
     Sim->Photons = malloc(sizeof(PhotonParams));
     malloc_and_fill_frequency_array(Sim, Sim->Photons);
@@ -169,7 +173,9 @@ void free_Sim_arrays(SimulationParams *Sim)
     free(Sim->Electrons->next_n);
     free(Sim->Electrons->gamma);
     free(Sim->Electrons->dgamma_forward);
+    free(Sim->Electrons->theory_n);
     free(Sim->Electrons);
+
     free(Sim->Photons->n);
     free(Sim->Photons->eps);
     free(Sim->Photons->delta_freq);
@@ -188,7 +194,7 @@ double power_law(double gamma, SimulationParams *Sim)
     }
     else
     {
-        return Sim->Q_e0 * Sim->norm * pow(gamma, (-1. * Sim->init_power));
+        return Sim->Q_e0 * Sim->norm * pow(gamma, (-1. * Sim->inject_power));
     }
 }
 
@@ -220,7 +226,7 @@ void normalize_inject_dist(double power, SimulationParams *Sim)
        double integral = 0;
        Sim->Q_e0 = 1.;
        Sim->norm = 1.;
-       for (int64_t i = 0; i <= Sim->array_len + 2; i++)
+       for (int64_t i = 0; i <= Sim->array_len + 1; i++)
        {
         integral += 0.5 
         * (Sim->I(Sim->Electrons->gamma[i + 1], Sim) 
@@ -233,6 +239,10 @@ void normalize_inject_dist(double power, SimulationParams *Sim)
 
 void set_initial_state(SimulationParams *Sim)
 {
+    // inject an initial power law if input
+    double hold = Sim->inject_power;
+    Sim->inject_power = Sim->init_power;
+
     Sim->Electrons->next_n[Sim->array_len+1] = 0.;
     Sim->Electrons->next_n[0] = Sim->LHS_BC;
     for (int64_t i = 1; i <= Sim->array_len; i++)
@@ -245,6 +255,7 @@ void set_initial_state(SimulationParams *Sim)
         / Sim->Q_e0);
         Sim->Electrons->current_n[i] = 0.;
     }
+    Sim->inject_power = hold;
 }
 
 // file writing code
@@ -331,6 +342,105 @@ void write_column_to_csv(const char *filename, double *data, int rows, const cha
     rename(temp_filename, filename);
 }
 
+
+// Trim whitespace from both ends of a string
+void trim(char *str) 
+{
+    char *start = str;
+    char *end = str + strlen(str) - 1;
+
+    // Trim leading whitespace
+    while (isspace(*start)) start++;
+
+    // Trim trailing whitespace
+    while (end > start && isspace(*end)) end--;
+
+    // Shift the trimmed string to the start
+    memmove(str, start, end - start + 1);
+    str[end - start + 1] = '\0';
+}
+
+int read_column_from_csv(const char *filename, double *data, int rows, const char *header)
+{
+    FILE *file = fopen(filename, "r");
+    if (file == NULL) {
+        fprintf(stderr, "Error: Unable to open file %s\n", filename);
+        return -1;
+    }
+
+    char line[1024];  // Buffer to read each line
+    char *token;
+    int header_index = -1;
+    int current_row = 0;
+
+    // Read the header line to find the column index
+    if (fgets(line, sizeof(line), file) != NULL) {
+        // Copy the line to avoid modifying the original
+        char *header_line = strdup(line);
+        
+        // Tokenize the header line
+        token = strtok(header_line, ",");
+        int col_index = 0;
+
+        while (token != NULL) {
+            // Trim whitespace from the token
+            trim(token);
+
+            // Debug print
+            //printf("Found header: '%s'\n", token);
+
+            if (strcmp(token, header) == 0) {
+                header_index = col_index;
+                break;
+            }
+            token = strtok(NULL, ",");
+            col_index++;
+        }
+
+        free(header_line);
+
+        if (header_index == -1) {
+            fprintf(stderr, "Error: Header '%s' not found\n", header);
+            fprintf(stderr, "CSV headers appear to be: %s", line);
+            fclose(file);
+            return -1;
+        }
+    }
+
+    // Read data rows
+    while (fgets(line, sizeof(line), file) && current_row < rows) {
+        // Copy the line to avoid modifying the original
+        char *data_line = strdup(line);
+        
+        token = strtok(data_line, ",");
+        
+        // Navigate to the correct column
+        for (int i = 0; i < header_index; i++) {
+            token = strtok(NULL, ",");
+            if (token == NULL) break;
+        }
+
+        // Convert and store the value
+        if (token != NULL) {
+            trim(token);
+            data[current_row] = atof(token);
+            current_row++;
+        }
+
+        free(data_line);
+    }
+
+    fclose(file);
+
+    // Check if we read the expected number of rows
+    if (current_row < rows) {
+        fprintf(stderr, "Warning: Only read %d rows instead of %d\n", current_row, rows);
+        return current_row;
+    }
+
+    return rows;
+}
+
 void calc_S(SimulationParams *Sim)
 {
     // calculate synchrotron ratio based on physics
@@ -364,7 +474,6 @@ double calc_tau_esc(SimulationParams *Sim)
 
 void implicit_step(SimulationParams *Sim, ElectronParams *Electron)
 {
-    
     for (int64_t i = 1; i <= Sim->gamma_eq_break; i++)
     {
         // implicit stepping regime
@@ -406,7 +515,7 @@ void save_step_to_prev_n(SimulationParams *Sim, ElectronParams *Electrons)
         Electrons->current_n[i] = Electrons->next_n[i];
     }
 }
-
+/*
 bool equilibrium_check(SimulationParams *Sim, ElectronParams *Electrons)
 {
     Sim->change = 0.;
@@ -435,6 +544,32 @@ bool equilibrium_check(SimulationParams *Sim, ElectronParams *Electrons)
     else
     {
         return false;
+    }
+}
+*/
+
+void accuracy_check(SimulationParams *Sim, ElectronParams *Electrons)
+{
+    int64_t N = 0;
+    Sim->change = 0.;
+    // calculate RMS difference in n
+    for (int64_t i = 1; i <= Sim->array_len; i++)
+    {
+        if (Sim->Electrons->next_n[i] < 1e-256 || Sim->Electrons->theory_n[i] < 1e-256)
+        {
+            continue;
+        }
+        Sim->change += pow(Electrons->next_n[i] - Electrons->theory_n[i], 2.);
+        N++;
+    }
+    Sim->change /= N;
+    Sim->change = sqrt(Sim->change);
+
+    // check err against specified end tolerance
+    if (Sim->change <= Sim->end_tol && Sim->end_sim == false)
+    {
+        printf("RMS err reached at step:%lld, last change: %e\n", Sim->iter, Sim->change);
+        Sim->end_sim=true;
     }
 }
 
@@ -556,30 +691,59 @@ void calc_flux(SimulationParams *Sim)
 }
 
 
-int find_closest_index(double *array,int64_t array_len, double target) {
-    int64_t closest_index = 0;
-    double minDiff = fabs(array[0] - target);
-    for (int i = 1; i < array_len; i++) {
-        double diff = fabs(array[i] - target);
-        if (diff < minDiff) {
-            minDiff = diff;
-            closest_index = i;
+// Function to find the closest index using binary search
+int find_closest_index(double *arr, int len, double value) {
+    int low = 0, high = len - 1;
+
+    while (low < high) {
+        int mid = (low + high) / 2;
+
+        // Adjust binary search bounds
+        if (arr[mid] < value) {
+            low = mid + 1;
+        } else {
+            high = mid;
         }
     }
 
-    return closest_index;
+    // Edge case: closest can be between low-1 and low
+    if (low > 0 && fabs(arr[low - 1] - value) < fabs(arr[low] - value)) {
+        return low - 1;
+    }
+    return low;
+}
+
+void set_theory_value(char *filepath, SimulationParams *Sim)
+{  
+    double C = Sim->norm * Sim->Q_e0;
+    // calculate the turn over gamma according to the theory
+    Sim->gamma_crit = 1. / ((1. - Sim->inject_power) * Sim->S * Sim->tau_esc);;
+    
+    int64_t index;
+    double *theory_n = malloc(sizeof(double) * THEORY_LEN);
+    double *theory_gamma = malloc(sizeof(double) * THEORY_LEN);
+
+    read_column_from_csv("csv_data/steady_state/best_value.csv", theory_n, THEORY_LEN, "electron_n");
+    read_column_from_csv("csv_data/steady_state/best_value.csv", theory_gamma, THEORY_LEN, "gamma");
+
+    for (int64_t i = 1; i < Sim->array_len+1; i++)
+    {
+        index = find_closest_index(theory_gamma, THEORY_LEN, Sim->Electrons->gamma[i]);
+        Sim->Electrons->theory_n[i] = theory_n[index];
+    }
+    write_column_to_csv(filepath, Sim->Electrons->theory_n, Sim->array_len+2, "theory");
 }
 
 void simulate(char *filepath, SimulationParams *Sim)
 {
     malloc_Sim_arrays(Sim);
     char header[100];
-    struct timeval start1, end1, start2, end2;
+    struct timeval start1, end1, start2, end2, starterr, enderr;
     gettimeofday(&start1, NULL);
 
     // write gammas to csv
     write_column_to_csv(filepath, Sim->Electrons->gamma, Sim->array_len+2, "gamma");
-    
+
     // take input params and calculate coefficients
     calc_S(Sim);
     normalize_inject_dist(Sim->inject_power, Sim);
@@ -598,12 +762,15 @@ void simulate(char *filepath, SimulationParams *Sim)
     }
 
     set_initial_state(Sim);
+    gettimeofday(&starterr, NULL);
+    set_theory_value(filepath,Sim);
+    gettimeofday(&enderr, NULL);
     Sim->t = 0.;
     Sim->iter = 0;
     Sim->end_sim = false;
     // start simulation
-    printf("Start Sim with C %e, tau %e B %.2lf, S %e g_array %lld, dt %.2e,\n", 
-    Sim->Q_e0 * Sim->norm, Sim->tau_esc, Sim->B, Sim->S, Sim->array_len, Sim->dt);
+    printf("Start Sim with C %e, tau %e, B %.2lf, S %e, g_array %lld, dt %.2e, norm %.3e,\n", 
+    Sim->Q_e0 * Sim->norm, Sim->tau_esc, Sim->B, Sim->S, Sim->array_len, Sim->dt, Sim->norm);
     // write initial state to file
     //sprintf(header, "n_e t=%e", Sim->t);
     //write_column_to_csv(filepath, Sim->Electrons->current_n, Sim->array_len+2, header);
@@ -612,7 +779,7 @@ void simulate(char *filepath, SimulationParams *Sim)
     {
         implicit_step(Sim, Sim->Electrons);
 
-        equilibrium_check(Sim, Sim->Electrons);
+        accuracy_check(Sim, Sim->Electrons);
 
         save_step_to_prev_n(Sim, Sim->Electrons);
         Sim->t += Sim->dt;
@@ -626,13 +793,13 @@ void simulate(char *filepath, SimulationParams *Sim)
         //}
         
     }
-    gettimeofday(&end1, NULL);
-    Sim->stepping_time = (end1.tv_sec - start1.tv_sec) + (end1.tv_usec - start1.tv_usec) / 1000000.0;
+    gettimeofday(&end2, NULL);
+    Sim->stepping_time = (end2.tv_sec - start2.tv_sec) + (end2.tv_usec - start2.tv_usec) / 1000000.0;
     printf("stepping time: %e\n", Sim->stepping_time);
 
     Sim->final_time=Sim->t;
     sprintf(header, "electron_n", Sim->t);
-    write_column_to_csv(filepath, Sim->Electrons->current_n, Sim->array_len+2, header);
+    write_column_to_csv(filepath, Sim->Electrons->next_n, Sim->array_len+2, header);
 
     // generate photon population
     /*
@@ -650,8 +817,9 @@ void simulate(char *filepath, SimulationParams *Sim)
     sprintf(header, "nu_flux");
     write_column_to_csv(filepath, Sim->nu_flux, Sim->array_len+2, header);
     */
-    gettimeofday(&end2, NULL);
-    Sim->whole_time = (end2.tv_sec - start2.tv_sec) + (end2.tv_usec - start2.tv_usec) / 1000000.0;
+    gettimeofday(&end1, NULL);
+    Sim->whole_time = ((end1.tv_sec - start1.tv_sec) + (end1.tv_usec - start1.tv_usec) / 1000000.0)
+                    - ((enderr.tv_sec - starterr.tv_sec) + (enderr.tv_usec - starterr.tv_usec) / 1000000.0);
     printf("whole time: %e\n", Sim->whole_time);
 }
 
@@ -668,21 +836,21 @@ void write_gammas_to_file(FILE *file, SimulationParams *Sim)
     fflush(file);
 }
 
-void write_run_file(char *filename, SimulationParams *Sim)
+void write_run_file(char *filename, SimulationParams *Sim, char *folder)
 {
     char filepath[100];
-    sprintf(filepath, "csv_data/implicit_solve/runs/run_%s", filename);
+    sprintf(filepath, "%s/implicit_solve/runs/run_%s", folder, filename);
 
     FILE *run_file = fopen(filepath, "w");
     
     fprintf(run_file, 
-    "dt,R,inject_p,inject_min,inject_max,rho,B,L,end_tol,Q_e0,S,tau_esc,norm,avg_gamma,V,array_len,max_gamma,min_gamma,init_p,samples_per_decade,final_time,change,tau_acc,whole_t,stepping_t\n");
+    "dt,R,inject_p,inject_min,inject_max,rho,B,L,end_tol,Q_e0,S,tau_esc,norm,avg_gamma,V,array_len,max_gamma,min_gamma,init_p,samples_per_decade,final_time,change,tau_acc,whole_t,stepping_t,C\n");
     fprintf(run_file,
-    "%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%lld,%e,%e,%e,%lld,%e,%e,%e,%e,%e\n",
+    "%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%lld,%e,%e,%e,%lld,%e,%e,%e,%e,%e,%e\n",
     Sim->dt,Sim->R,Sim->inject_power,Sim->inject_min,Sim->inject_max,Sim->rho,Sim->B, 
     Sim->L,Sim->end_tol, Sim->Q_e0,Sim->S,Sim->tau_esc,Sim->norm,Sim->avg_gamma,Sim->V,
     Sim->array_len,Sim->max_gamma,Sim->min_gamma,Sim->init_power,Sim->samples_per_decade,
-    Sim->final_time,Sim->change, Sim->tau_acc,Sim->whole_time,Sim->stepping_time);
+    Sim->final_time,Sim->change, Sim->tau_acc,Sim->whole_time,Sim->stepping_time,Sim->Q_e0*Sim->norm);
     fclose(run_file);
 }
 
@@ -738,7 +906,7 @@ int main()
     Sim->inject_max = 1e8;
     Sim->inject_power = 2.3;
     //Sim->inject_power_2 = 4.29;
-    Sim->B = 1.;
+    Sim->B = 0.1;
     Sim->R = 1e16;
     Sim->L = 1e30;
     Sim->doppler_factor = pow(10, 1.44);
@@ -767,10 +935,10 @@ int main()
     Sim->min_freq = 1e6;
     Sim->max_freq = 1e17;
     Sim->init_power = 2.;
-    Sim->samples_per_decade = 80;
+    Sim->samples_per_decade = 1024;
     Sim->dt = 1e100; //calc_tau_esc(Sim);
     Sim->end_t = 1e10;
-    Sim->end_tol = 1e-8;
+    Sim->end_tol = 7.476e-18;
     // generate the cooling test data
     /*
     hold = Sim->B;
@@ -798,6 +966,7 @@ int main()
     }
     Sim->B = hold;
     */
+
     /*
     // generate the acceleration test data
     hold = Sim->tau_acc;
@@ -819,27 +988,37 @@ int main()
     Sim->tau_acc = hold;
     */
     
+    
     // test time taken vs samples per decade
     hold = Sim->samples_per_decade;
-    for (int iter=1; iter <= 100; iter++)
+    double errors[24] = {5.300543e-18, 5.077918e-18, 4.409532e-18, 3.606349e-18,
+       2.781763e-18, 2.106981e-18, 1.552867e-18, 1.136148e-18,
+       8.244339e-19, 5.936426e-19, 4.255398e-19, 3.033327e-19,
+       2.157888e-19, 1.529995e-19, 1.080439e-19, 7.612935e-20,
+       5.341784e-20, 3.733794e-20, 2.590944e-20, 1.786697e-20,
+       1.210564e-20, 8.165546e-21, 5.191190e-21, 3.441887e-21};
+
+    for (int iter=1; iter <= 25; iter++)
     {
-    for (int i =8; i < 25; i++)
+    for (int i =8; i < 32; i++)
     {
         Sim->samples_per_decade = (int) pow(2., (float) i / 2.);
+        Sim->end_tol = errors[i-8];
         // generate file name based on B
         char filename[100], filepath[100];
         sprintf(filename, "%lld_samples_per_dec_%lld.csv", iter, Sim->samples_per_decade);
         printf("generating %s\n",filename);
-        sprintf(filepath, "csv_data/implicit_solve/%s", filename);
+        sprintf(filepath, "time_testing/implicit_solve/%s", filename);
         FILE *file = fopen(filepath, "w");
         fclose(file);
         simulate(filepath, Sim);
 
-        write_run_file(filename, Sim);
+        write_run_file(filename, Sim, "time_testing");
     }
     }
     Sim->samples_per_decade = hold;
     
+
     char filename[100], filepath[100];
     sprintf(filename, "simulation_data.csv");
     sprintf(filepath, "csv_data/implicit_solve/%s", filename);
@@ -847,63 +1026,8 @@ int main()
     fclose(file);
 
     simulate(filepath, Sim);
-    write_run_file(filename, Sim);
-
-    /* 
-    hold = (double)Sim->samples_per_decade;
-    double param[5] = {5,10,20,30,40};
-    for (int i =0; i < 5; i++)
-    {
-        Sim->samples_per_decade = param[i];
-        malloc_and_fill_gamma_array(Sim, Sim->Species[0]);
-        // generate file name based on B
-        char filename[150], filepath[150], run_filepath[150];
-        sprintf(filename, "samples_pd%.0lld.csv", Sim->samples_per_decade);
-        sprintf(filepath, "csv_data/%s", filename);
-        sprintf(run_filepath, "csv_data/runs/run_%s", filename);
-            
-        FILE *file = fopen(filepath, "w");
-        FILE *run_file = fopen(run_filepath, "w");
-
-        // print gamma array in csv file as header
-        write_gammas_to_file(file, Sim);
-
-        simulate(file, Sim);
-
-        write_run_file(run_file, Sim);
-        fclose(file);
-        fclose(run_file);
-    }
-    Sim->samples_per_decade = (int64_t)hold;
-    */
-
-    /*
-    hold = Sim->dt;
-    double param[5] = {1e4,2.5e4,5e4,1e5,2.5e5};
-    for (int i =0; i < 5; i++)
-    {
-        Sim->dt = param[i];
-        malloc_and_fill_gamma_array(Sim, Sim->Species[0]);
-        // generate file name based on B
-        char filename[150], filepath[150], run_filepath[150];
-        sprintf(filename, "dt%.0lf.csv", Sim->dt);
-        sprintf(filepath, "csv_data/%s", filename);
-        sprintf(run_filepath, "csv_data/runs/run_%s", filename);
-            
-        FILE *file = fopen(filepath, "w");
-        FILE *run_file = fopen(run_filepath, "w");
-
-        // print gamma array in csv file as header
-        write_gammas_to_file(file, Sim);
-
-        simulate(file, Sim);
-
-        write_run_file(run_file, Sim);
-        fclose(file);
-        fclose(run_file);
-    }
-    Sim->dt = hold;
-    */
+    write_run_file(filename, Sim, "csv_data");
+    printf("err:%e\n",Sim->change);
 
     // end program
     free_Sim_arrays(Sim);

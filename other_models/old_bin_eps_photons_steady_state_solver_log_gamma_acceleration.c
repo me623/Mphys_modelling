@@ -102,7 +102,7 @@ void malloc_and_fill_gamma_array(SimulationParams *Sim, ElectronParams *Lepton)
 
     Lepton->delta_ln_gamma = log(Lepton->gamma[1]) - log(Lepton->gamma[0]);
 }
-void malloc_and_fill_eps_array(SimulationParams *Sim, PhotonParams *Photons)
+void fill_eps_array(SimulationParams *Sim, PhotonParams *Photons)
 {
     int64_t decades, samples_per_decade;
     // calculate number of decades in the gamma range
@@ -137,7 +137,7 @@ void malloc_Sim_arrays(SimulationParams *Sim)
     Sim->Electrons->prev_n = malloc((Sim->array_len + 2) * sizeof(double));
 
     Sim->Photons = malloc(sizeof(PhotonParams));
-    malloc_and_fill_eps_array(Sim, Sim->Photons);
+    fill_eps_array(Sim, Sim->Photons);
     Sim->Photons->n = calloc((Sim->array_len + 2), sizeof(double));
 
 }
