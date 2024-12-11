@@ -7,13 +7,11 @@
 #include <stdbool.h>
 #include <sys/time.h>
 #include <gsl/gsl_sf_hyperg.h>
-#include <gsl/gsl_sf_bessel.h> // GNU Scientific Library for Bessel functions
 
 // code settings
 #define WRITE_STEPS 0
 #define TOLERANCE 1e-6  // Tolerance for numerical integration
 #define INFINITY_CUTOFF 100.0  // Approximate "infinity" for inner integral
-#define BUFFER_SIZE 33554432
 #define APPROXIMATE_XCS 1   // use approximation avoiding long Whitaker function calculation
 
 // CGS unit constants
@@ -123,6 +121,7 @@ void fill_gamma_array(SimulationParams *Sim, ElectronParams *Electrons)
     }
 
 }
+
 void fill_eps_array(SimulationParams *Sim, PhotonParams *Photons)
 {
     // calculate number of decades in the gamma range
@@ -236,7 +235,9 @@ double broken_power_law(double gamma, SimulationParams *Sim)
     {
         if (gamma > Sim->inject_break)
         {
-            return Sim->Q_e0 * Sim->norm * pow(Sim->inject_break / Sim->inject_min, -Sim->inject_power) * pow(gamma / Sim->inject_break, -Sim->inject_power_2);
+            return Sim->Q_e0 * Sim->norm 
+            * pow(Sim->inject_break / Sim->inject_min, -Sim->inject_power) 
+            * pow(gamma / Sim->inject_break, -Sim->inject_power_2);
         }
         else
         {
@@ -251,7 +252,7 @@ void normalize_inject_dist(SimulationParams *Sim)
     double integral = 0;
     Sim->Q_e0 = 1.;
     Sim->norm = 1.;
-    for (int64_t i = 0; i <= Sim->array_len + 1; i++)
+    for (int64_t i = 0; i <= Sim->array_len; i++)
     {
         integral += 0.5 * (Sim->I(Sim->Electrons->gamma[i + 1], Sim) + Sim->I(Sim->Electrons->gamma[i], Sim)) * (Sim->Electrons->dgamma_fwd[i]);
     }
@@ -596,6 +597,13 @@ void impose_BCs(SimulationParams *Sim, ElectronParams *Electrons)
     // fix high gamma population = 0
     Electrons->n[Sim->array_len + 1] = 0.;
 }
+
+// critical frequency for photon calculation
+double nu_crit(double gamma, SimulationParams *Sim)
+{
+    return (gamma * gamma * Sim->B * 3. * q) / (4. * M_PI * m_e * c);
+}
+
 #if APPROXIMATE_XCS == 0
 // Function to compute the Whittaker function W
 double W(double kappa, double mu, double z)
@@ -616,13 +624,35 @@ double CS(double x)
 {
     return W(0., 4. / 3., x) * W(0., 1. / 3., x) - W(1. / 2., 5. / 6., x) * W(-1. / 2., 5. / 6., x);
 }
-#endif
 
-// critical frequency for photon calculation
-double nu_crit(double gamma, SimulationParams *Sim)
+double fill_xCS_array(double freq, SimulationParams *Sim)
 {
-    return (gamma * gamma * Sim->B * 3. * q) / (4. * M_PI * m_e * c);
+    for (int64_t i = 1; i <= Sim->array_len - 1; i++)
+    {
+        double *gamma = Sim->Electrons->gamma;
+        double *xCS = Sim->Photons->xCS;
+        // use trapezium rule
+        double x = (freq / (nu_crit(gamma[i], Sim)));
+        xCS[i] = x * CS(x);
+    }
 }
+#else
+void fill_xCS_array(double freq, SimulationParams *Sim)
+{
+    // use approximate 
+    double *xCS = Sim->Photons->xCS;;
+    for (int64_t i = 1; i <= Sim->array_len - 1; i++)
+    {
+    double x = (freq / (nu_crit(Sim->Electrons->gamma[i], Sim)));
+    if(x < 0.291)
+        xCS[i] = (29 * cbrt(x) - 27 * x) / 25;
+    else if(x < 2.7675)
+        xCS[i] = (135 - 77 * x + 12 * x * x) / 250;
+    else
+        xCS[i] = exp(-x) * (1 - 1 / (3 * x));
+    }
+}
+#endif
 
 /*
 // my flux and photon calculation which didnt work
@@ -684,35 +714,6 @@ void photon_calc(SimulationParams *Sim)
     }
 }
 */
-#if APPROXIMATE_XCS == 0
-double fill_xCS_array(double freq, SimulationParams *Sim)
-{
-    for (int64_t i = 1; i <= Sim->array_len - 1; i++)
-    {
-        double *gamma = Sim->Electrons->gamma;
-        double *xCS = Sim->Photons->xCS;
-        // use trapezium rule
-        double x = (freq / (nu_crit(gamma[i], Sim)));
-        xCS[i] = x * CS(x);
-    }
-}
-#else
-void fill_xCS_array(double freq, SimulationParams *Sim)
-{
-    // use approximate 
-    double *xCS = Sim->Photons->xCS;;
-    for (int64_t i = 1; i <= Sim->array_len - 1; i++)
-    {
-    double x = (freq / (nu_crit(Sim->Electrons->gamma[i], Sim)));
-    if(x < 0.291)
-        xCS[i] = (29 * cbrt(x) - 27 * x) / 25;
-    else if(x < 2.7675)
-        xCS[i] = (135 - 77 * x + 12 * x * x) / 250;
-    else
-        xCS[i] = exp(-x) * (1 - 1 / (3 * x));
-    }
-}
-#endif
 
 double calc_absorption(double freq, SimulationParams *Sim)
 {
@@ -862,11 +863,12 @@ void simulate(char *filename, SimulationParams *Sim)
     // start solver
     printf("samples:%lld\n", Sim->array_len);
     gettimeofday(&start2, NULL);
+
     save_step_to_prev_n(Sim, Sim->Electrons);
     stepping_regime(Sim, Sim->Electrons);
     impose_BCs(Sim, Sim->Electrons);
-    gettimeofday(&end2, NULL);
 
+    gettimeofday(&end2, NULL);
     Sim->solve_time = (end2.tv_sec - start2.tv_sec) + (end2.tv_usec - start2.tv_usec) / 1000000.0;
 
     // generate photon population
@@ -923,67 +925,6 @@ int main()
     Sim->min_eps = 1e-12;
     Sim->max_eps = 1e8;
     Sim->samples_per_decade = 40;
-    
-    /*
-    // Cooling test
-    Sim->nu = 1e-10;
-    Sim->inject_min = 1e4;
-    Sim->inject_max = 1e8;
-    Sim->inject_power = 2.3;
-    Sim->B = 0.01;
-    Sim->R = 1e16;
-    Sim->L = 1e30;
-    Sim->doppler_factor = pow(10, 1.83);
-    Sim->z = 0.33;
-    Sim->tau_acc = 1e100;
-    Sim->I = &power_law;
-    Sim->LHS_BC = 0;
-
-    // generate the cooling test data
-    hold = Sim->B;
-    double B[6] = {0.1,0.25,0.5,1.,1.5,2.};
-    for (int i =0; i < 6; i++)
-    {
-        Sim->B = B[i];
-        // generate file name based on B
-        char filename[100];
-        sprintf(filename, "B%.2lf.csv", Sim->B);
-        printf("\nSimulate: %s\n", filename);
-        simulate(filename, Sim);
-    }
-    Sim->B = hold;
-    */
-
-    /*
-    //Acceleration test
-    Sim->nu = 1e-10;
-    Sim->inject_min = 1e1;
-    Sim->inject_max = 1e2;
-    Sim->inject_power = 2.3;
-    Sim->B = 0.0001;
-    Sim->R = 1e16;
-    Sim->L = 1e30;
-    Sim->doppler_factor = pow(10, 1.83);
-    Sim->z = 0.33;
-    Sim->tau_acc = calc_tau_esc(Sim) * .5;
-    Sim->I = &power_law;
-    Sim->LHS_BC = 5e-10;
-
-    // generate the acceleration test data
-    hold = Sim->tau_acc;
-    Sim->tau_esc_free = calc_tau_esc(Sim);
-    double t_acc_multi[5] = {0.5,1.0,1.5,2.0,4.0};
-    for (int i =0; i < 5; i++)
-    {
-        Sim->tau_acc = t_acc_multi[i] * Sim->tau_esc_free;
-        // generate file name based on B
-        char filename[100];
-        sprintf(filename, "t_acc=%1.1lf_t_esc.csv", t_acc_multi[i]);
-        printf("\nSimulate: %s\n",filename);
-        simulate(filename, Sim);
-    }
-    Sim->tau_acc = hold;
-    */
 
     // KATU comparison Steady State values
     Sim->nu = 1.;
