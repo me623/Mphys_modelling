@@ -22,7 +22,7 @@ typedef struct ElectronParams
     double *n;
     double *prev_n;
     double *gamma;
-    double delta_ln_gamma;
+    double dln_gamma;
 } ElectronParams;
 
 typedef struct PhotonParams
@@ -99,7 +99,7 @@ void malloc_and_fill_gamma_array(SimulationParams *Sim, ElectronParams *Lepton)
         Lepton->gamma[i] = pow(10, log10(Sim->min_gamma) + (i-1) / (double)Sim->samples_per_decade);
     }
 
-    Lepton->delta_ln_gamma = log(Lepton->gamma[1]) - log(Lepton->gamma[0]);
+    Lepton->dln_gamma = log(Lepton->gamma[1]) - log(Lepton->gamma[0]);
 }
 void malloc_and_fill_frequency_array(SimulationParams *Sim, PhotonParams *Photons)
 {
@@ -330,10 +330,10 @@ void stepping_regime(SimulationParams *Sim, ElectronParams *Lepton)
         Lepton->n[i] = 
         (Sim->tau_esc * 
         (Sim->S * Lepton->gamma[i+1] * Lepton->gamma[i+1] * Lepton->n[i+1]
-        - Lepton->gamma[i] * Lepton->delta_ln_gamma 
+        - Lepton->gamma[i] * Lepton->dln_gamma 
         * Sim->I(Lepton->gamma[i], Sim)))
          /
-        (Lepton->gamma[i] * (Sim->S * Sim->tau_esc * Lepton->gamma[i] - Lepton->delta_ln_gamma));
+        (Lepton->gamma[i] * (Sim->S * Sim->tau_esc * Lepton->gamma[i] - Lepton->dln_gamma));
     }
 }
 
@@ -555,7 +555,7 @@ void write_run_file(SimulationParams *Sim, char *filename)
     "delta_ln_gamma,R,inject_p,inject_min,inject_max,rho,B,L,end_tol,Q_e0,S,tau_esc,norm,avg_gamma,V,array_len,max_gamma,min_gamma,init_p,samples_per_decade,change,crit_freq\n");
     fprintf(file,
     "%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%lld,%e,%e,%e,%lld,%e,%e\n",
-    Sim->Electrons->delta_ln_gamma, Sim->R,Sim->inject_power,Sim->inject_min,Sim->inject_max,Sim->B,Sim->L,
+    Sim->Electrons->dln_gamma, Sim->R,Sim->inject_power,Sim->inject_min,Sim->inject_max,Sim->B,Sim->L,
     Sim->end_tol, Sim->Q_e0,Sim->S,Sim->tau_esc,Sim->norm,Sim->avg_gamma,Sim->V,Sim->array_len,
     Sim->max_gamma,Sim->min_gamma,Sim->init_power,Sim->samples_per_decade, Sim->change,nu_crit(Sim->inject_min, Sim));
     fclose(file);

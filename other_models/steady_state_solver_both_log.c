@@ -51,7 +51,7 @@ typedef struct ElectronParams
     double *prev_lnn;
     double *gamma;
     double *ln_gamma;
-    double delta_ln_gamma;
+    double dln_gamma;
 } ElectronParams;
 
 typedef struct SimulationParams
@@ -119,7 +119,7 @@ void malloc_and_fill_gamma_array(SimulationParams *Sim, ElectronParams *Lepton)
     Lepton->gamma[0] = pow(10, log10(Sim->min_gamma) - log_step);
     Lepton->ln_gamma[0] = log(Lepton->gamma[0]);
 
-    Lepton->delta_ln_gamma = Lepton->ln_gamma[1] - Lepton->ln_gamma[0];
+    Lepton->dln_gamma = Lepton->ln_gamma[1] - Lepton->ln_gamma[0];
 }
 
 void malloc_Sim_arrays(SimulationParams *Sim)
@@ -299,10 +299,10 @@ void stepping_regime(SimulationParams *Sim, ElectronParams *Lepton)
         Sim->lambertw = lambertW(
             -1. * (
             (I(Lepton->gamma[i], Sim->inject_min, Sim->inject_max, Sim->inject_power, Sim) 
-            * Lepton->delta_ln_gamma * exp( 
+            * Lepton->dln_gamma * exp( 
             -1.* ((
             (Sim->S * Sim->tau_esc * Lepton->gamma[i+1] * Lepton->gamma[i+1] * Lepton->lnn[i+1]
-            + Lepton->delta_ln_gamma * Lepton->gamma[i]))
+            + Lepton->dln_gamma * Lepton->gamma[i]))
             /
             (Sim->S * Sim->tau_esc * Lepton->gamma[i] * Lepton->gamma[i]))
             ))
@@ -314,7 +314,7 @@ void stepping_regime(SimulationParams *Sim, ElectronParams *Lepton)
         Lepton->lnn[i] = 
         (Sim->lambertw * Sim->S * Sim->tau_esc * Lepton->gamma[i] * Lepton->gamma[i]
         + Sim->S * Sim->tau_esc * Lepton->gamma[i+1] * Lepton->gamma[i+1] * Lepton->lnn[i+1]
-        + Lepton->delta_ln_gamma * Lepton->gamma[i])
+        + Lepton->dln_gamma * Lepton->gamma[i])
         /
         (Sim->S * Sim->tau_esc * Lepton->gamma[i] * Lepton->gamma[i])
         ;
@@ -419,7 +419,7 @@ void write_run_file(SimulationParams *Sim, char *filename)
     "delta_ln_gamma,R,inject_p,inject_min,inject_max,rho,B,L,end_tol,Q_e0,S,tau_esc,norm,avg_gamma,V,array_len,max_gamma,min_gamma,init_p,samples_per_decade,change\n");
     fprintf(file,
     "%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%lld,%e,%e,%e,%lld,%e\n",
-    Sim->Species[0]->delta_ln_gamma, Sim->R,Sim->inject_power,Sim->inject_min,Sim->inject_max,Sim->rho,Sim->B,Sim->L,
+    Sim->Species[0]->dln_gamma, Sim->R,Sim->inject_power,Sim->inject_min,Sim->inject_max,Sim->rho,Sim->B,Sim->L,
     Sim->end_tol, Sim->Q_e0,Sim->S,Sim->tau_esc,Sim->norm,Sim->avg_gamma,Sim->V,Sim->array_len,
     Sim->max_gamma,Sim->min_gamma,Sim->init_power,Sim->samples_per_decade, Sim->change);
     fclose(file);

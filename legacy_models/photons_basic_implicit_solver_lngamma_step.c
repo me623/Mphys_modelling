@@ -17,7 +17,7 @@ typedef struct ElectronParams
     double *current_n;
     double *next_n;
     double *gamma;
-    double delta_ln_gamma;
+    double dln_gamma;
 } ElectronParams;
 
 typedef struct PhotonParams
@@ -92,7 +92,7 @@ void malloc_and_fill_gamma_array(SimulationParams *Sim, ElectronParams *Lepton)
     // Extrapolate gamma[0] based on gamma[1]
     Lepton->gamma[0] = pow(10, log10(Sim->min_gamma) - log_step);
 
-    Lepton->delta_ln_gamma = log(Lepton->gamma[1]) - log(Lepton->gamma[0]);
+    Lepton->dln_gamma = log(Lepton->gamma[1]) - log(Lepton->gamma[0]);
 }
 void malloc_and_fill_frequency_array(SimulationParams *Sim, PhotonParams *Photons)
 {
@@ -307,14 +307,14 @@ void implicit_step(SimulationParams *Sim, ElectronParams *Lepton)
         Lepton->next_n[i] =
         Sim->tau_esc * 
         (Sim->S * Sim->dt * Lepton->gamma[i+1] * Lepton->gamma[i+1] * Lepton->next_n[i+1]
-        - Lepton->delta_ln_gamma * Sim->dt * 
+        - Lepton->dln_gamma * Sim->dt * 
           I(Lepton->gamma[i], Sim->inject_min, Sim->inject_max, Sim->inject_power, Sim) * Lepton->gamma[i]
-        - Lepton->delta_ln_gamma * Lepton->gamma[i] * Lepton->current_n[i])
+        - Lepton->dln_gamma * Lepton->gamma[i] * Lepton->current_n[i])
         /
         (Lepton->gamma[i] * 
         (Sim->S* Sim->tau_esc * Sim->dt * Lepton->gamma[i]
-        - Lepton->delta_ln_gamma * Sim->tau_esc
-        - Lepton->delta_ln_gamma * Sim->dt));
+        - Lepton->dln_gamma * Sim->tau_esc
+        - Lepton->dln_gamma * Sim->dt));
     }
 }
 

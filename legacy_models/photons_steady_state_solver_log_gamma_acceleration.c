@@ -22,7 +22,7 @@ typedef struct ElectronParams
     double *n;
     double *prev_n;
     double *gamma;
-    double delta_ln_gamma;
+    double dln_gamma;
 } ElectronParams;
 
 typedef struct PhotonParams
@@ -100,7 +100,7 @@ void malloc_and_fill_gamma_array(SimulationParams *Sim, ElectronParams *Lepton)
         Lepton->gamma[i] = pow(10, log10(Sim->min_gamma) + (i-1) / (double)Sim->samples_per_decade);
     }
 
-    Lepton->delta_ln_gamma = log(Lepton->gamma[1]) - log(Lepton->gamma[0]);
+    Lepton->dln_gamma = log(Lepton->gamma[1]) - log(Lepton->gamma[0]);
 }
 void malloc_and_fill_frequency_array(SimulationParams *Sim, PhotonParams *Photons)
 {
@@ -336,11 +336,11 @@ void stepping_regime(SimulationParams *Sim, ElectronParams *Electron)
             Electron->n[i] = 
             (Sim->tau_esc * 
             (Sim->S * pow(Electron->gamma[i+1], 2) * Electron->n[i+1] * Sim->tau_acc
-            - Electron->gamma[i] * Electron->delta_ln_gamma * Sim->I(Electron->gamma[i], Sim) * Sim->tau_acc
+            - Electron->gamma[i] * Electron->dln_gamma * Sim->I(Electron->gamma[i], Sim) * Sim->tau_acc
             + Electron->n[i+1]))
             /
             (Sim->S * pow(Electron->gamma[i], 2) * Sim->tau_esc * Sim->tau_acc 
-            - Sim->tau_acc * Electron->gamma[i] * Electron->delta_ln_gamma
+            - Sim->tau_acc * Electron->gamma[i] * Electron->dln_gamma
             + Sim->tau_esc);
         }
         else
@@ -349,11 +349,11 @@ void stepping_regime(SimulationParams *Sim, ElectronParams *Electron)
             Electron->n[i] = 
             (Sim->tau_esc * 
             (Sim->S * pow(Electron->gamma[i-1], 2) * Electron->n[i-1] * Sim->tau_acc
-            + Electron->gamma[i] * Electron->delta_ln_gamma * Sim->I(Electron->gamma[i], Sim) * Sim->tau_acc
+            + Electron->gamma[i] * Electron->dln_gamma * Sim->I(Electron->gamma[i], Sim) * Sim->tau_acc
             + Electron->n[i-1]))
             /
             (Sim->S * pow(Electron->gamma[i], 2) * Sim->tau_esc * Sim->tau_acc 
-            + Sim->tau_acc * Electron->gamma[i] * Electron->delta_ln_gamma
+            + Sim->tau_acc * Electron->gamma[i] * Electron->dln_gamma
             + Sim->tau_esc);
         }
     }
@@ -578,7 +578,7 @@ void write_run_file(SimulationParams *Sim, char *filename)
     "delta_ln_gamma,R,inject_p,inject_min,inject_max,B,L,end_tol,Q_e0,S,tau_esc,norm,avg_gamma,V,array_len,max_gamma,min_gamma,init_p,samples_per_decade,change,crit_freq,tau_acc\n");
     fprintf(file,
     "%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%lld,%e,%e,%e,%lld,%e,%e,%e,\n",
-    Sim->Electrons->delta_ln_gamma, Sim->R,Sim->inject_power,Sim->inject_min,Sim->inject_max,Sim->B,Sim->L,
+    Sim->Electrons->dln_gamma, Sim->R,Sim->inject_power,Sim->inject_min,Sim->inject_max,Sim->B,Sim->L,
     Sim->end_tol, Sim->Q_e0,Sim->S,Sim->tau_esc,Sim->norm,Sim->avg_gamma,Sim->V,Sim->array_len,
     Sim->max_gamma,Sim->min_gamma,Sim->init_power,Sim->samples_per_decade, Sim->change,nu_crit(Sim->inject_min, Sim),
     Sim->tau_acc);
