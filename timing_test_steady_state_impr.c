@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <windows.h>
 #include <sys/time.h>
 #include <gsl/gsl_sf_hyperg.h>
 
@@ -34,6 +35,7 @@ typedef struct ElectronParams
     double *prev_n;
     double *gamma;
     double *dgamma_fwd;
+    double *theory_n;
     double dln_gamma;
     double tau_esc;
 } ElectronParams;
@@ -102,8 +104,109 @@ typedef struct SimulationParams
     int64_t gamma_eq_break; // the index of the equilibrium point
     double sim_time;      // time for whole simulation
     double solve_time;   // time for just relaxation of electrons
+    double theory_error;
+    double change;
+    double iter;
 
 } SimulationParams;
+
+// Trim whitespace from both ends of a string
+void trim(char *str) 
+{
+    char *start = str;
+    char *end = str + strlen(str) - 1;
+
+    // Trim leading whitespace
+    while (isspace(*start)) start++;
+
+    // Trim trailing whitespace
+    while (end > start && isspace(*end)) end--;
+
+    // Shift the trimmed string to the start
+    memmove(str, start, end - start + 1);
+    str[end - start + 1] = '\0';
+}
+
+int read_column_from_csv(const char *filename, double *data, int rows, const char *header)
+{
+    FILE *file = fopen(filename, "r");
+    if (file == NULL) {
+        fprintf(stderr, "Error: Unable to open file %s\n", filename);
+        return -1;
+    }
+
+    char line[1024];  // Buffer to read each line
+    char *token;
+    int header_index = -1;
+    int current_row = 0;
+
+    // Read the header line to find the column index
+    if (fgets(line, sizeof(line), file) != NULL) {
+        // Copy the line to avoid modifying the original
+        char *header_line = strdup(line);
+        
+        // Tokenize the header line
+        token = strtok(header_line, ",");
+        int col_index = 0;
+
+        while (token != NULL) {
+            // Trim whitespace from the token
+            trim(token);
+
+            // Debug print
+            //printf("Found header: '%s'\n", token);
+
+            if (strcmp(token, header) == 0) {
+                header_index = col_index;
+                break;
+            }
+            token = strtok(NULL, ",");
+            col_index++;
+        }
+
+        free(header_line);
+
+        if (header_index == -1) {
+            fprintf(stderr, "Error: Header '%s' not found\n", header);
+            fprintf(stderr, "CSV headers appear to be: %s", line);
+            fclose(file);
+            return -1;
+        }
+    }
+
+    // Read data rows
+    while (fgets(line, sizeof(line), file) && current_row < rows) {
+        // Copy the line to avoid modifying the original
+        char *data_line = strdup(line);
+        
+        token = strtok(data_line, ",");
+        
+        // Navigate to the correct column
+        for (int i = 0; i < header_index; i++) {
+            token = strtok(NULL, ",");
+            if (token == NULL) break;
+        }
+
+        // Convert and store the value
+        if (token != NULL) {
+            trim(token);
+            data[current_row] = atof(token);
+            current_row++;
+        }
+
+        free(data_line);
+    }
+
+    fclose(file);
+
+    // Check if we read the expected number of rows
+    if (current_row < rows) {
+        fprintf(stderr, "Warning: Only read %d rows instead of %d\n", current_row, rows);
+        return current_row;
+    }
+
+    return rows;
+}
 
 void fill_gamma_array(SimulationParams *Sim, ElectronParams *Electrons)
 {
@@ -152,6 +255,7 @@ void malloc_Sim_arrays(SimulationParams *Sim)
     Electrons->dgamma_fwd = malloc((Sim->array_len + 2) * sizeof(double));
     Electrons->n = malloc((Sim->array_len + 2) * sizeof(double));
     Electrons->prev_n = malloc((Sim->array_len + 2) * sizeof(double));
+    Electrons->theory_n = malloc((Sim->array_len + 2) * sizeof(double));
 
     // malloc gamma and delta gamma arrays
     Photons->eps = calloc(Sim->array_len + 2, sizeof(double));
@@ -184,21 +288,26 @@ void free_Sim_arrays(SimulationParams *Sim)
     free(Sim->nu_flux);
 }
 
-int find_closest_index(double *array, int64_t array_len, double target)
-{
-    int64_t closest_index = 0;
-    double minDiff = fabs(array[0] - target);
-    for (int i = 1; i < array_len; i++)
-    {
-        double diff = fabs(array[i] - target);
-        if (diff < minDiff)
-        {
-            minDiff = diff;
-            closest_index = i;
+// Function to find the closest index using binary search
+int find_closest_index(double *arr, int len, double value) {
+    int low = 0, high = len - 1;
+
+    while (low < high) {
+        int mid = (low + high) / 2;
+
+        // Adjust binary search bounds
+        if (arr[mid] < value) {
+            low = mid + 1;
+        } else {
+            high = mid;
         }
     }
 
-    return closest_index;
+    // Edge case: closest can be between low-1 and low
+    if (low > 0 && fabs(arr[low - 1] - value) < fabs(arr[low] - value)) {
+        return low - 1;
+    }
+    return low;
 }
 
 double freq_from_eps(double eps)
@@ -809,18 +918,52 @@ void calc_flux(SimulationParams *Sim)
 void write_run_file(char *filename, SimulationParams *Sim)
 {
     char filepath[100];
-    sprintf(filepath, "csv_data/steady_state/runs/run_%s", filename);
+    sprintf(filepath, "time_testing/steady_state/runs/run_%s", filename);
 
     FILE *file = fopen(filepath, "w");
     fprintf(file,
-            "dln_gamma,R,inject_p,inject_p_2,inject_min,inject_break,inject_max,B,L,Q_e0,S,tau_esc,norm,avg_gamma,V,array_len,max_gamma,min_gamma,samples_per_decade,crit_freq,tau_acc,gamma_eq,gamma_eq_break,sim_time,solve_time,z,doppler_factor\n");
+            "dln_gamma,R,inject_p,inject_p_2,inject_min,inject_break,inject_max,B,L,Q_e0,S,tau_esc,norm,avg_gamma,V,array_len,max_gamma,min_gamma,samples_per_decade,crit_freq,tau_acc,gamma_eq,gamma_eq_break,sim_time,solve_time,z,doppler_factor,theory_err\n");
     fprintf(file,
-            "%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%lld,%e,%e,%lld,%e,%e,%e,%e,%lld,%e,%e,%e,%e\n",
+            "%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%e,%lld,%e,%e,%lld,%e,%e,%e,%lld,%e,%e,%e,%e,%e\n",
             Sim->Electrons->dln_gamma, Sim->R, Sim->inject_power, Sim->inject_power_2, Sim->inject_min, Sim->inject_break, Sim->inject_max, Sim->B, Sim->L,
             Sim->Q_e0, Sim->S, Sim->tau_esc_free, Sim->norm, Sim->avg_gamma, Sim->V, Sim->array_len,
             Sim->max_gamma, Sim->min_gamma, Sim->samples_per_decade, nu_crit(Sim->inject_min, Sim),
-            Sim->tau_acc, Sim->gamma_eq, Sim->gamma_eq_break, Sim->sim_time, Sim->solve_time, Sim->z, Sim->doppler_factor);
+            Sim->tau_acc, Sim->gamma_eq, Sim->gamma_eq_break, Sim->sim_time, Sim->solve_time, Sim->z, Sim->doppler_factor,Sim->theory_error);
     fclose(file);
+}
+
+void check_theory_cooling(SimulationParams *Sim)
+{
+    int64_t index, len = 917504;
+    double *theory_n = malloc(sizeof(double) * len);
+    double *theory_gamma = malloc(sizeof(double) * len);
+
+    read_column_from_csv("csv_data/steady_state/best_value.csv", theory_n, len, "electron_n");
+    read_column_from_csv("csv_data/steady_state/best_value.csv", theory_gamma, len, "gamma");
+
+    for (int64_t i = 1; i < Sim->array_len+1; i++)
+    {
+        index = find_closest_index(theory_gamma, len, Sim->Electrons->gamma[i]);
+        Sim->Electrons->theory_n[i] = theory_n[index];
+    }
+
+    int64_t N=0;
+    Sim->theory_error = 0.;
+    // calculate RMS difference in n
+    for (int64_t i = 1; i <= Sim->array_len; i++)
+    {
+        N++;
+        if (Sim->Electrons->n[i] < 1e-128 || Sim->Electrons->theory_n[i] < 1e-128)
+        {
+            continue;
+        }
+        Sim->theory_error += pow(Sim->Electrons->n[i] - Sim->Electrons->theory_n[i], 2.);
+    }
+    Sim->theory_error /= N;
+    Sim->theory_error = sqrt(Sim->theory_error);
+
+    free(theory_n);
+    free(theory_gamma);
 }
 
 void simulate(char *filename, SimulationParams *Sim)
@@ -835,14 +978,17 @@ void simulate(char *filename, SimulationParams *Sim)
     // take input params and calculate relevant parameters
 
     // create file
+    
     Sim->filename = filename;
     Sim->filepath = malloc(sizeof(char) * 100);
-    sprintf(Sim->filepath, "csv_data/steady_state/%s", filename);
+    sprintf(Sim->filepath, "time_testing/steady_state/%s", filename);
+    /*
     FILE *file = fopen(Sim->filepath, "w");
     // write gammas to csv
     write_column_to_csv(file, Sim->Electrons->gamma, Sim->array_len + 2, "gamma");
     fclose(file);
 
+    */
     clear_n_e_array(Sim);
     // calculate physical parameters
     calc_S(Sim);
@@ -872,29 +1018,37 @@ void simulate(char *filename, SimulationParams *Sim)
     Sim->solve_time = (end2.tv_sec - start2.tv_sec) + (end2.tv_usec - start2.tv_usec) / 1000000.0;
 
     // generate photon population
-    photon_calc(Sim);
+    //photon_calc(Sim);
     // generate the flux array based on photons
-    calc_flux(Sim);
+    //calc_flux(Sim);
 
     // write data
-
+    printf("Done! print statment for parity with implicit\n");
+    gettimeofday(&end1, NULL);
+    Sim->sim_time = ((end1.tv_sec - start1.tv_sec) + (end1.tv_usec - start1.tv_usec) / 1000000.0);
+    /*
     FILE *file2 = fopen(Sim->filepath, "r+");
     write_column_to_csv(file2, Sim->Electrons->n, Sim->array_len + 2, "electron_n");
-    write_column_to_csv(file2, Sim->Photons->eps, Sim->array_len + 2, "photon_eps");
-    write_column_to_csv(file2, Sim->Photons->n, Sim->array_len + 2, "photon_n");
-    write_column_to_csv(file2, Sim->Photons->emission, Sim->array_len + 2, "emission");
-    write_column_to_csv(file2, Sim->Photons->absorption, Sim->array_len + 2, "absorption");
-    write_column_to_csv(file2, Sim->flux_eps, Sim->array_len + 2, "flux_eps");
-    write_column_to_csv(file2, Sim->nu_flux, Sim->array_len + 2, "nu_flux");
+    write_column_to_csv(file2, Sim->Electrons->theory_n, Sim->array_len + 2, "theory");
+    //write_column_to_csv(file2, Sim->Photons->eps, Sim->array_len + 2, "photon_eps");
+    //write_column_to_csv(file2, Sim->Photons->n, Sim->array_len + 2, "photon_n");
+    //write_column_to_csv(file2, Sim->Photons->emission, Sim->array_len + 2, "emission");
+    //write_column_to_csv(file2, Sim->Photons->absorption, Sim->array_len + 2, "absorption");
+    //write_column_to_csv(file2, Sim->flux_eps, Sim->array_len + 2, "flux_eps");
+    //write_column_to_csv(file2, Sim->nu_flux, Sim->array_len + 2, "nu_flux");
 
-    fill_xCS_array(nu_crit(1e3,Sim),Sim);
-    write_column_to_csv(file2, Sim->Photons->xCS, Sim->array_len + 2, "xCS");
+    //fill_xCS_array(nu_crit(1e3,Sim),Sim);
+    //write_column_to_csv(file2, Sim->Photons->xCS, Sim->array_len + 2, "xCS");
     fclose(file2);
-
-    gettimeofday(&end1, NULL);
-    Sim->sim_time = (end1.tv_sec - start1.tv_sec) + (end1.tv_usec - start1.tv_usec) / 1000000.0;
+        */
+    
     printf("solving time: %e\n", Sim->solve_time);
     printf("sim time: %e\n", Sim->sim_time);
+
+    //check_theory_cooling(Sim);
+    //FILE *file3 = fopen(Sim->filepath, "r+");
+    //write_column_to_csv(file3, Sim->Electrons->prev_n, Sim->array_len+2, "theory");
+    //fclose(file3);
     write_run_file(Sim->filename, Sim);
 }
 
@@ -902,66 +1056,15 @@ int main()
 {
     double hold;
     SimulationParams *Sim = malloc(sizeof(SimulationParams));
-    // simulation setup
-    // free params
-    /*
-    // KATU comparison Injection values
-    Sim->nu = 1.;
-    Sim->inject_min = pow(10, 3.95);
-    Sim->inject_break = pow(10, 4.26);
-    Sim->inject_max = pow(10, 7.68);
-    Sim->inject_power = 1.22;
-    Sim->inject_power_2 = 3.37;
-    Sim->B = pow(10, -1.36);
-    Sim->R = pow(10, 16.12);
-    Sim->L = pow(10, 41.54);
-    Sim->doppler_factor = pow(10, 1.83);
-    Sim->tau_acc = 1e99;
-    Sim->z = 0.33;
-    Sim->I = &broken_power_law;
-    */
 
-    Sim->nu = 1;
-    Sim->inject_min = pow(10, 1.33);
-    Sim->inject_break = pow(10, 4.03);
-    Sim->inject_max = pow(10, 6.82);
-    Sim->inject_power = 1.69;
-    Sim->inject_power_2 = 4.29;
-    Sim->B = pow(10, -1.01);
-    Sim->R = pow(10, 16.45);
-    //Sim->L = pow(10, 45.647);
-    Sim->L = pow(10, 45.37);
-    Sim->doppler_factor = pow(10, 1.44);
-    Sim->tau_acc = 1e256;
-    Sim->z = 0.33;
-    Sim->I = &broken_power_law;
-    Sim->LHS_BC = 0.;
 
     // array params
     Sim->min_gamma = 1e1;
     Sim->max_gamma = 1e8;
     Sim->min_eps = 1e-12;
     Sim->max_eps = 1e8;
-    Sim->samples_per_decade =40;
-    /*
-    // KATU comparison Steady State values
-    Sim->nu = 1.;
-    Sim->inject_min = pow(10, 1.33);
-    Sim->inject_break = pow(10, 4.03);
-    Sim->inject_max = pow(10, 6.82);
-    Sim->inject_power = 1.69;
-    Sim->inject_power_2 = 4.29;
-    Sim->B = pow(10, -1.01);
-    Sim->R = pow(10, 16.45);
-    //Sim->L = pow(10, 45.647);
-    Sim->L = pow(10, 45.37);
-    Sim->doppler_factor = pow(10, 1.44);
-    Sim->tau_acc = 1e256;
-    Sim->z = 0.33;
-    Sim->I = &broken_power_law;
-    Sim->LHS_BC = 0.;
-    */
-    /*
+    Sim->samples_per_decade = 256;
+
     Sim->nu = 1e-10;
     Sim->inject_min = 1e4;
     Sim->inject_max = 1e8;
@@ -974,69 +1077,24 @@ int main()
     Sim->tau_acc = 1e256;
     Sim->I = &power_law;
     Sim->LHS_BC = 0;
-    */
-    simulate("simulation_data.csv", Sim);
-    /*
-    // Generate cooling test data
-    Sim->nu = 1e-10;
-    Sim->inject_min = 1e4;
-    Sim->inject_max = 1e8;
-    Sim->inject_power = 2.3;
-    Sim->B = 0.01;
-    Sim->R = 1e16;
-    Sim->L = 1e30;
-    Sim->doppler_factor = pow(10, 1.83);
-    Sim->z = 0.33;
-    Sim->tau_acc = 1e100;
-    Sim->I = &power_law;
-    Sim->LHS_BC = 0;
 
-    // generate the cooling test data
-    hold = Sim->B;
-    double B[6] = {0.1,0.25,0.5,1.,1.5,2.};
-    for (int i =0; i < 6; i++)
+    // test time taken vs samples per decade
+    hold = Sim->samples_per_decade;
+    for (int iter=1; iter <= 50; iter++)
     {
-        Sim->B = B[i];
-        // generate file name based on B
-        char filename[100];
-        sprintf(filename, "B%.2lf.csv", Sim->B);
-        printf("\nSimulate: %s\n", filename);
-        simulate(filename, Sim);
-    }
-    Sim->B = hold;
-    */
-
-    /*
-    //Acceleration test
-    Sim->nu = 1e-10;
-    Sim->inject_min = 1e1;
-    Sim->inject_max = 1e2;
-    Sim->inject_power = 2.3;
-    Sim->B = 0.0001;
-    Sim->R = 1e16;
-    Sim->L = 1e30;
-    Sim->doppler_factor = pow(10, 1.83);
-    Sim->z = 0.33;
-    Sim->tau_acc = calc_tau_esc(Sim) * .5;
-    Sim->I = &power_law;
-    Sim->LHS_BC = 5e-10;
-
-    // generate the acceleration test data
-    hold = Sim->tau_acc;
-    Sim->tau_esc_free = calc_tau_esc(Sim);
-    double t_acc_multi[5] = {0.5,1.0,1.5,2.0,4.0};
-    for (int i =0; i < 5; i++)
+    for (int i =8; i < 28; i++)
     {
-        Sim->tau_acc = t_acc_multi[i] * Sim->tau_esc_free;
+        Sim->samples_per_decade = (int) pow(2., (float) i / 2.);
         // generate file name based on B
-        char filename[100];
-        sprintf(filename, "t_acc=%1.1lf_t_esc.csv", t_acc_multi[i]);
-        printf("\nSimulate: %s\n",filename);
+        char filename[100], filepath[100];
+        sprintf(filename, "%lld_samples_per_dec_%lld.csv", iter, Sim->samples_per_decade);
+        printf("generating %s\n",filename);
         simulate(filename, Sim);
+        Sleep(10);
     }
-    Sim->tau_acc = hold;
-    */
-
+    }
+    Sim->samples_per_decade = hold;
+    
     // end program
     free_Sim_arrays(Sim);
     free(Sim);

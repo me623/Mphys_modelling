@@ -103,7 +103,7 @@ void malloc_and_fill_gamma_array(SimulationParams *Sim, ElectronParams *Electron
     decades = (int64_t)log10(Sim->max_gamma) - log10(Sim->min_gamma);
     // set array length based on decades and input samples per decade
     Sim->array_len = decades * Sim->samples_per_decade;
-
+    printf("%lld\n", Sim->array_len);
     // malloc gamma and delta gamma array
     Electrons->gamma = malloc((Sim->array_len + 2) * sizeof(double));
     Electrons->dgamma_fwd = malloc((Sim->array_len + 2) * sizeof(double));
