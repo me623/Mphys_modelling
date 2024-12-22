@@ -825,7 +825,7 @@ void write_run_file(char *filename, SimulationParams *Sim)
 
 void simulate(char *filename, SimulationParams *Sim)
 {
-    struct timeval start1, end1, start2, end2;
+    struct timeval start1, end1, start2, end2, start3, end3;
     // start simulation timer
     gettimeofday(&start1, NULL);
 
@@ -871,10 +871,14 @@ void simulate(char *filename, SimulationParams *Sim)
     gettimeofday(&end2, NULL);
     Sim->solve_time = (end2.tv_sec - start2.tv_sec) + (end2.tv_usec - start2.tv_usec) / 1000000.0;
 
+    gettimeofday(&start3, NULL);
     // generate photon population
     photon_calc(Sim);
+    gettimeofday(&end3, NULL);
+    printf("photon calc time: %e\n", (end3.tv_sec - start3.tv_sec) + (end3.tv_usec - start3.tv_usec) / 1000000.0);
     // generate the flux array based on photons
     calc_flux(Sim);
+
 
     // write data
 
@@ -886,10 +890,10 @@ void simulate(char *filename, SimulationParams *Sim)
     write_column_to_csv(file2, Sim->Photons->absorption, Sim->array_len + 2, "absorption");
     write_column_to_csv(file2, Sim->flux_eps, Sim->array_len + 2, "flux_eps");
     write_column_to_csv(file2, Sim->nu_flux, Sim->array_len + 2, "nu_flux");
-
-    fill_xCS_array(nu_crit(1e3,Sim),Sim);
-    write_column_to_csv(file2, Sim->Photons->xCS, Sim->array_len + 2, "xCS");
-    fclose(file2);
+    
+    //fill_xCS_array(nu_crit(1e3,Sim),Sim);
+    //write_column_to_csv(file2, Sim->Photons->xCS, Sim->array_len + 2, "xCS");
+    //fclose(file2);
 
     gettimeofday(&end1, NULL);
     Sim->sim_time = (end1.tv_sec - start1.tv_sec) + (end1.tv_usec - start1.tv_usec) / 1000000.0;
@@ -933,7 +937,7 @@ int main()
     Sim->L = pow(10, 45.37);
     Sim->doppler_factor = pow(10, 1.44);
     Sim->tau_acc = 1e256;
-    Sim->z = 0.33;
+    Sim->z = 0.34;
     Sim->I = &broken_power_law;
     Sim->LHS_BC = 0.;
 
@@ -942,7 +946,7 @@ int main()
     Sim->max_gamma = 1e8;
     Sim->min_eps = 1e-12;
     Sim->max_eps = 1e8;
-    Sim->samples_per_decade =40;
+    Sim->samples_per_decade =80;
     /*
     // KATU comparison Steady State values
     Sim->nu = 1.;

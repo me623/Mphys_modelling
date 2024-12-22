@@ -801,12 +801,28 @@ int main()
     Sim->I = &power_law;
     Sim->LHS_BC = 0;
 
+    Sim->nu = 1;
+    Sim->inject_min = pow(10, 1.33);
+    Sim->inject_break = pow(10, 4.03);
+    Sim->inject_max = pow(10, 6.82);
+    Sim->inject_power = 1.69;
+    Sim->inject_power_2 = 4.29;
+    Sim->B = pow(10, -1.01);
+    Sim->R = pow(10, 16.45);
+    //Sim->L = pow(10, 45.647);
+    Sim->L = pow(10, 45.37);
+    Sim->doppler_factor = pow(10, 1.44);
+    Sim->tau_acc = 1e256;
+    Sim->z = 0.34;
+    Sim->I = &broken_power_law;
+    Sim->LHS_BC = 0.;
+
     // simulation setup  
     Sim->min_gamma = 1e1;
     Sim->max_gamma = 1e8;
     Sim->min_eps = 1e-12;
     Sim->max_eps = 1e8;
-    Sim->samples_per_decade = 40;
+    Sim->samples_per_decade = 80;
     Sim->init_power = 2.;
     Sim->dt = 1e100;    // max out the time step
     Sim->end_t = 1e10;
